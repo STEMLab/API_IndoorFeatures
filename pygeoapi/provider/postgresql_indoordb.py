@@ -109,9 +109,10 @@ class PostgresIndoorDB:
         Returns:
             dict: Metadata dict or None if not found.
         """
-        with self.connection.cursor() as cur:
+        with self.connection.cursor(cursor_factory=NamedTupleCursor) as cur:
             try:
-                query = "SELECT id_str, collection_property FROM collection WHERE id_str = %s"
+                query = """SELECT id_str, collection_property, (SELECT ST_Extent(geojson_geometry) 
+                            FROM indoorfeature WHERE collection_id = 1) as extent_indoorfeature FROM collection WHERE id_str = %s"""
                 cur.execute(query, (collection_id,))
                 row = cur.fetchone()
             
@@ -120,14 +121,25 @@ class PostgresIndoorDB:
                 
                 c_id = row[0]
                 props = row[1] if row[1] else {}
-                
+                coords = row.extent_indoorfeature
+                spatial_bbox = [float(x) for x in re.findall(r"[-+]?\d*\.\d+|\d+", coords)]
+                spatial = {
+                    "bbox": [
+                        spatial_bbox # [minx, miny, maxx, maxy]
+                    ],
+                    "crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+                }
+            
                 response = {
                     'id': c_id,
                     'title': props.get('title', c_id),
                     'description': props.get('description', ''),
-                    'itemType': props.get('itemType', 'indoorfeature')
+                    'itemType': props.get('itemType', 'indoorfeature'),
+                    'extent': {
+                        'spatial': spatial
+                    }
                 }
-
+                
                 return response
             except Exception as e:
                 LOGGER.debug(e)

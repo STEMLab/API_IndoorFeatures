@@ -113,22 +113,16 @@ def get_collection(api: API, request: APIRequest, dataset=None) -> Tuple[dict, i
     try:
         pidb_provider.connect()
         # 1. Fetch from DB
-        collection_data = pidb_provider.get_collection(collection_id)
+        response = pidb_provider.get_collection(collection_id)
 
-        if not collection_data:
+        if not response:
             return api.get_exception(
                 HTTPStatus.NOT_FOUND, headers, request.format,
                 'NotFound', f'Collection {collection_id} not found.')
 
         # 3. Construct Response
-        response = {
-            "id": collection_data['id'],
-            "title": collection_data['title'],
-            "description": collection_data.get('description', ''),
-            "itemType": collection_data.get('itemType', 'indoorfeature'),
-            "keywords": [], # Empty defaults to prevent crashes
-            "links": [],
-        }
+        response["keywords"] = []
+        response["links"] = []
 
         # Add Links
         response['links'].append({
@@ -139,8 +133,13 @@ def get_collection(api: API, request: APIRequest, dataset=None) -> Tuple[dict, i
             "href": f"{api.config['server']['url']}/collections/{collection_id}/items?f=json", 
             "rel": "items", "type": "application/geo+json", "title": "IndoorGML Features"
         })
-
-        return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
+        response['collections_path'] = f"{api.config['server']['url']}/collections"
+        LOGGER.debug(f"{api.config['server']['url']}/collections")
+        content = render_j2_template(
+                api.config, api.config['server']['templates'],
+                'collections/collection.html', response, request.locale)
+        
+        return headers, HTTPStatus.OK, content
     except Exception as e:
         return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', str(e))
     finally:
@@ -404,13 +403,13 @@ def get_collection_items(api: API, request: APIRequest, dataset) -> Tuple[dict, 
             'links': links,
             'features': content
         }
+        feature_collection['collections_path'] = f"{api.config['server']['url']}/collections"
+        feature_collection['dataset_path'] = f"{api.config['server']['url']}/collections/{dataset}"
+        content_body = render_j2_template(api.config, api.config['server']['templates'],
+                                     'collections/items/index.html',
+                                     feature_collection, request.locale)
         
-        # 1. Get Headers (Standard OGC headers)
-        headers = request.get_response_headers(SYSTEM_LOCALE)
-        
-        # 2. Serialize the content to a string
-        content_body = to_json(feature_collection, api.pretty_print)
-        
+
         # 3. Return in the correct order: Headers, Status, Content
         return headers, HTTPStatus.OK, content_body
     except Exception as err:
