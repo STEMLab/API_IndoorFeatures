@@ -21,6 +21,8 @@ let selectedFeatureId = null;
 let selectedFeatureData = null; // Store the fetched GeoJSON here
 let selectedILCId = null;
 let selectedLayerId = null;
+let selectedMemberId = null;
+let selectedDualMemberId = null;
 
 const plot3d = document.getElementById("plot3d");
 const plot2d = document.getElementById("plot2d");
@@ -384,6 +386,7 @@ function renderFeatures(features, colId) {
       document.getElementById("indoorFeature-delete-target-name").innerText = f.id;
       document.getElementById("interLayerConnection-indoorFeature-name").innerText = f.id;
       document.getElementById("thematicLayer-indoorFeature-name").innerText = f.id;
+      document.getElementById("thematicLayer-post-target-name").innerText = f.id;
 
       // Inside your renderFeatures function (right sidebar click):
       selectedLayerId = null;
@@ -660,6 +663,7 @@ function renderThematicLayerList(layers, levels) {
       document.querySelectorAll('#thematicLayers-db-list .db-item-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
+      document.getElementById("primalSpace-post-target-name").innerText = layer.id;
       // Set target for DELETE
       selectedLayerId = layer.id;
       document.getElementById("thematicLayers-delete-target-name").innerText = layer.id;
@@ -742,3 +746,169 @@ document.getElementById("thematicLayers-delete-button").addEventListener("click"
     console.error("Delete Error:", err);
   }
 });
+
+document.getElementById("api-get-primalSpaceLayer").addEventListener("click", async () => {
+  const listDiv = document.getElementById("primalSpaceLayer-db-list");
+  
+  if (!selectedCollectionId || !selectedFeatureId || !selectedLayerId) {
+    listDiv.innerHTML = "<div class='tiny' style='color:red;'>Select a Thematic Layer first!</div>";
+    return;
+  }
+
+  try {
+    listDiv.innerHTML = "<div class='tiny'>Loading Primal Members...</div>";
+    const data = await api.getPrimalSpaceLayer(selectedCollectionId, selectedFeatureId, selectedLayerId);
+    
+    apiLog.textContent = JSON.stringify(data, null, 2);
+    renderPrimalMembers(data);
+  } catch (err) {
+    listDiv.innerHTML = `<div class='tiny' style='color:red;'>Error: ${err.message}</div>`;
+  }
+});
+
+function renderPrimalMembers(data) {
+  const listDiv = document.getElementById("primalSpaceLayer-db-list");
+  listDiv.innerHTML = "";
+
+  const cells = data.cellSpaceMember || [];
+  const boundaries = data.cellBoundaryMember || [];
+
+  const createBtn = (item, type) => {
+    const btn = document.createElement("button");
+    btn.className = "db-item-btn";
+    const id = item.id || item; // Handle if it's an object or just a string ID
+    btn.innerHTML = `<strong>${type === 'cell' ? '📦' : '🟦'} ${id}</strong><br><small>${type}</small>`;
+    
+    btn.onclick = () => {
+      document.querySelectorAll('#primalSpaceLayer-db-list .db-item-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      
+      selectedMemberId = id;
+      document.getElementById("primalSpaceLayer-delete-target-name").innerText = id;
+      apiLog.textContent = JSON.stringify(item, null, 2);
+    };
+    return btn;
+  };
+
+  cells.forEach(c => listDiv.appendChild(createBtn(c, 'cell')));
+  boundaries.forEach(b => listDiv.appendChild(createBtn(b, 'boundary')));
+}
+
+// POST
+document.getElementById("primalSpaceLayer-upload-button").onclick = async () => {
+  const fileInput = document.getElementById("primalSpaceLayer-file-input");
+  const status = document.getElementById("primalSpaceLayer-upload-status");
+  
+  try {
+    const data = JSON.parse(await fileInput.files[0].text());
+    await api.postPrimalMember(selectedCollectionId, selectedFeatureId, selectedLayerId, data);
+    status.innerHTML = "<span style='color:green;'>✅ Member Added!</span>";
+    document.getElementById("api-get-primalSpaceLayer").click();
+  } catch (err) { status.innerText = err.message; }
+};
+
+// PATCH
+document.getElementById("primalSpaceLayer-patch-button").onclick = async () => {
+  if (!selectedMemberId) return alert("Select a member first!");
+  const fileInput = document.getElementById("primalSpaceLayer-file-input");
+  
+  try {
+    const data = JSON.parse(await fileInput.files[0].text());
+    await api.managePrimalMember(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedMemberId, 'PATCH', data);
+    alert("Member updated!");
+  } catch (err) { alert(err.message); }
+};
+
+// DELETE
+document.getElementById("primalSpaceLayer-delete-button").onclick = async () => {
+  if (!selectedMemberId || !confirm(`Delete ${selectedMemberId}?`)) return;
+  
+  try {
+    await api.managePrimalMember(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedMemberId, 'DELETE');
+    document.getElementById("api-get-primalSpaceLayer").click();
+    document.getElementById("primalSpaceLayer-delete-target-name").innerText = "None";
+    selectedMemberId = null;
+  } catch (err) { alert(err.message); }
+};
+
+// 1. GET Logic
+document.getElementById("api-get-dualSpaceLayer").addEventListener("click", async () => {
+  const listDiv = document.getElementById("dualSpaceLayer-db-list");
+  if (!selectedCollectionId || !selectedFeatureId || !selectedLayerId) {
+    listDiv.innerHTML = "<div class='tiny' style='color:red;'>Select a Thematic Layer first!</div>";
+    return;
+  }
+
+  try {
+    listDiv.innerHTML = "<div class='tiny'>Loading Dual Members...</div>";
+    const data = await api.getDualSpaceLayer(selectedCollectionId, selectedFeatureId, selectedLayerId);
+    apiLog.textContent = JSON.stringify(data, null, 2);
+    renderDualMembers(data);
+  } catch (err) {
+    listDiv.innerHTML = `<div class='tiny' style='color:red;'>Error: ${err.message}</div>`;
+  }
+});
+
+// 2. Rendering Logic
+function renderDualMembers(data) {
+  const listDiv = document.getElementById("dualSpaceLayer-db-list");
+  listDiv.innerHTML = "";
+
+  const nodes = data.nodeMember || [];
+  const edges = data.edgeMember || [];
+
+  const createBtn = (item, type) => {
+    const btn = document.createElement("button");
+    btn.className = "db-item-btn";
+    const id = item.id || item;
+    btn.innerHTML = `<strong>${type === 'node' ? '⚪' : '➖'} ${id}</strong><br><small>${type}</small>`;
+    
+    btn.onclick = () => {
+      document.querySelectorAll('#dualSpaceLayer-db-list .db-item-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      selectedDualMemberId = id;
+      document.getElementById("dualSpaceLayer-delete-target-name").innerText = id;
+      apiLog.textContent = JSON.stringify(item, null, 2);
+    };
+    return btn;
+  };
+
+  nodes.forEach(n => listDiv.appendChild(createBtn(n, 'node')));
+  edges.forEach(e => listDiv.appendChild(createBtn(e, 'edge')));
+}
+
+// 3. POST / PATCH / DELETE Handlers
+document.getElementById("dualSpaceLayer-upload-button").onclick = async () => {
+  const fileInput = document.getElementById("dualSpaceLayer-file-input");
+  const status = document.getElementById("dualSpaceLayer-upload-status");
+  if (!fileInput.files.length) return alert("Select a file!");
+
+  try {
+    const data = JSON.parse(await fileInput.files[0].text());
+    await api.postDualMember(selectedCollectionId, selectedFeatureId, selectedLayerId, data);
+    status.innerHTML = "<span style='color:green;'>✅ Dual Member Added!</span>";
+    document.getElementById("api-get-dualSpaceLayer").click();
+  } catch (err) { status.innerHTML = `<span style='color:red;'>❌ ${err.message}</span>`; }
+};
+
+document.getElementById("dualSpaceLayer-patch-button").onclick = async () => {
+  if (!selectedDualMemberId) return alert("Select a dual member first!");
+  const fileInput = document.getElementById("dualSpaceLayer-file-input");
+  if (!fileInput.files.length) return alert("Select a JSON file!");
+
+  try {
+    const data = JSON.parse(await fileInput.files[0].text());
+    await api.manageDualMember(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedDualMemberId, 'PATCH', data);
+    alert("Dual member updated!");
+  } catch (err) { alert(err.message); }
+};
+
+document.getElementById("dualSpaceLayer-delete-button").onclick = async () => {
+  if (!selectedDualMemberId || !confirm(`Delete Dual Member ${selectedDualMemberId}?`)) return;
+  try {
+    await api.manageDualMember(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedDualMemberId, 'DELETE');
+    document.getElementById("api-get-dualSpaceLayer").click();
+    document.getElementById("dualSpaceLayer-delete-target-name").innerText = "None";
+    selectedDualMemberId = null;
+  } catch (err) { alert(err.message); }
+};
