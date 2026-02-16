@@ -399,7 +399,7 @@ function renderFeatures(features, colId) {
         // Fetch the data and store it globally
         selectedFeatureData = await api.getSingleFeature(colId, f.id);
         
-        apiLog.textContent = JSON.stringify(selectedFeatureData, null, 2);
+        //apiLog.textContent = JSON.stringify(selectedFeatureData, null, 2);
         apiStatus.textContent = `Selected: ${f.id}. Click 'Visualize' to view.`;
       } catch (err) {
         apiLog.textContent = "Error fetching feature: " + err.message;
@@ -616,7 +616,7 @@ document.getElementById("api-get-thematicLayers").addEventListener("click", asyn
     const data = await api.getThematicLayers(selectedCollectionId, selectedFeatureId);
     
     // 1. Log the full response
-    apiLog.textContent = JSON.stringify(data, null, 2);
+    //apiLog.textContent = JSON.stringify(data, null, 2);
 
     // 2. Render the layers list
     renderThematicLayerList(data.layers || [], data.levels || []);
@@ -759,7 +759,7 @@ document.getElementById("api-get-primalSpaceLayer").addEventListener("click", as
     listDiv.innerHTML = "<div class='tiny'>Loading Primal Members...</div>";
     const data = await api.getPrimalSpaceLayer(selectedCollectionId, selectedFeatureId, selectedLayerId);
     
-    apiLog.textContent = JSON.stringify(data, null, 2);
+    //apiLog.textContent = JSON.stringify(data, null, 2);
     renderPrimalMembers(data);
   } catch (err) {
     listDiv.innerHTML = `<div class='tiny' style='color:red;'>Error: ${err.message}</div>`;
@@ -842,7 +842,7 @@ document.getElementById("api-get-dualSpaceLayer").addEventListener("click", asyn
   try {
     listDiv.innerHTML = "<div class='tiny'>Loading Dual Members...</div>";
     const data = await api.getDualSpaceLayer(selectedCollectionId, selectedFeatureId, selectedLayerId);
-    apiLog.textContent = JSON.stringify(data, null, 2);
+    //apiLog.textContent = JSON.stringify(data, null, 2);
     renderDualMembers(data);
   } catch (err) {
     listDiv.innerHTML = `<div class='tiny' style='color:red;'>Error: ${err.message}</div>`;

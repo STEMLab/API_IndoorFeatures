@@ -7,7 +7,9 @@
       128.87170034082445, 35.24556901384791
     ]
   },
-  "properties": {},
+  "properties": {
+    "title": "Dummy indoorjson"
+  },
   "layers": [
     {
       "id": "TL-1",

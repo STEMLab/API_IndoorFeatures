@@ -15,7 +15,7 @@ from datetime import datetime
 from pygeoapi.provider.postgresql_indoordb import PostgresIndoorDB
 import psycopg2
 from shapely import wkt
-from shapely.errors import WKTReadingError
+from shapely.errors import ShapelyError
 
 # Load schema once when the module is loaded
 SCHEMA_PATH = 'data/indoorjson_schema.json'
@@ -133,6 +133,10 @@ def get_collection(api: API, request: APIRequest, dataset=None) -> Tuple[dict, i
             "href": f"{api.config['server']['url']}/collections/{collection_id}/items?f=json", 
             "rel": "items", "type": "application/geo+json", "title": "IndoorGML Features"
         })
+        if request.format == F_JSON:
+            return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
+
+        response['base_path'] = f"{api.config['server']['url']}"
         response['collections_path'] = f"{api.config['server']['url']}/collections"
         LOGGER.debug(f"{api.config['server']['url']}/collections")
         content = render_j2_template(
@@ -394,17 +398,28 @@ def get_collection_items(api: API, request: APIRequest, dataset) -> Tuple[dict, 
                 'title': 'Previous page',
                 'href': prev_href
             })
+        
+        links.append({
+            'rel': 'collection',
+            'type': 'application/geo+json',
+            'title': dataset,
+            'href': f"{api.config['server']['url']}/collections/{dataset}"
+        })
 
         # --- CONSTRUCT RESPONSE ---
         feature_collection = {
             'type': 'FeatureCollection',
             'numberMatched': number_matched,
             'numberReturned': len(content),
-            'links': links,
-            'features': content
+            'features': content,
+            'links': links
         }
+        if request.format == F_JSON:
+            return headers, HTTPStatus.OK, to_json(feature_collection, api.pretty_print)
+        
         feature_collection['collections_path'] = f"{api.config['server']['url']}/collections"
         feature_collection['dataset_path'] = f"{api.config['server']['url']}/collections/{dataset}"
+        feature_collection['items_path'] = f"{api.base_url}/collections/{dataset}/items"
         content_body = render_j2_template(api.config, api.config['server']['templates'],
                                      'collections/items/index.html',
                                      feature_collection, request.locale)
@@ -461,7 +476,7 @@ def get_collection_item(api: API, request: APIRequest, dataset, identifier) -> T
 
     try:
         pidb_provider.connect()
-        result = pidb_provider.get_feature(
+        response = pidb_provider.get_feature(
             collection_str_id, 
             ifeature_str_id, 
             level=level,
@@ -469,7 +484,7 @@ def get_collection_item(api: API, request: APIRequest, dataset, identifier) -> T
         )
         
         # If the result is None (e.g., ID doesn't exist), handle 404
-        if not result:
+        if not response:
              msg = f'Item {identifier} not found'
              return api.get_exception(
                 HTTPStatus.NOT_FOUND,
@@ -486,13 +501,28 @@ def get_collection_item(api: API, request: APIRequest, dataset, identifier) -> T
             self_href += "?" + urllib.parse.urlencode(query_params)
 
 
-        result['links'].append({
+        response['links'].append({
             "href": self_href,
             "rel": "self",
             "type": "application/geo+json",
-            "title": "IndoorFeature Metadata"
+            "title": ifeature_str_id
         })
-
+        
+        response['links'].append({
+            'href': f"{api.config['server']['url']}/collections/{dataset}",
+            'rel': 'collection',
+            'type': 'application/geo+json',
+            'title': dataset
+        })
+        if request.format == F_JSON:
+            return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
+        response['collections_path'] = f"{api.config['server']['url']}/collections"
+        response['dataset_path'] = f"{api.config['server']['url']}/collections/{dataset}"
+        response['items_path'] = f"{api.config['server']['url']}/collections/{dataset}/items"
+        content = render_j2_template(api.config, api.config['server']['templates'],
+                                     'collections/items/item.html',
+                                     response, request.locale)
+        return headers, HTTPStatus.OK, content
     except (Exception, psycopg2.Error) as error:
         msg = str(error)
         return api.get_exception(
@@ -501,7 +531,7 @@ def get_collection_item(api: API, request: APIRequest, dataset, identifier) -> T
     finally:
         pidb_provider.disconnect()
     
-    return headers, HTTPStatus.OK, to_json(result, api.pretty_print)
+    
 #endregion
 
 # region ThematicLayers
@@ -1695,7 +1725,7 @@ def validate_geom(geom_wkt=None) -> str:
 
         return True
 
-    except WKTReadingError:
+    except ShapelyError:
         raise ValueError("Invalid WKT Syntax. Could not parse geometry string.")
     except Exception as e:
         # Catch explicit ValueErrors raised above or other unexpected issues

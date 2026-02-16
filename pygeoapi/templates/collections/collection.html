@@ -96,6 +96,14 @@
               {% trans %}Browse through the items of{% endtrans %} "{{ data['title'] }}"</a></div>
         </li>
       </ul>
+      <h3>{% trans %}Visualization{% endtrans %}</h3>
+      <ul>
+        <li>
+          <div>
+            <a title="{% trans %}Visualizing IndoorFeature{% endtrans %}" href="{{ data['base_path'] }}/static/workSpace/workSpace.html">
+              {% trans %}Visualizing through the IndoorFeature of {% endtrans %} "{{ data['title'] }}"</a></div>
+        </li>
+      </ul>
       {% endif  %}
 
       {% if 'parameter_names' in data %}

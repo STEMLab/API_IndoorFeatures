@@ -14,8 +14,8 @@ export async function getIndoorCollections() {
 
 /** Fetch items within a specific collection */
 export async function getCollectionItems(url) {
-  const fetchUrl = url.includes('?') ? `${url}&f=json` : `${url}?f=json`;
-  const response = await fetch(fetchUrl);
+  //const fetchUrl = url.includes('?') ? `${url}&f=json` : `${url}?f=json`;
+  const response = await fetch(url);
   if (!response.ok) throw new Error("Failed to list items");
   return await response.json();
 }
