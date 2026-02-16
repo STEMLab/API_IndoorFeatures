@@ -6467,7 +6467,7 @@
         {
             "id": "C17",
             "featureType": "CellSpace",
-            "cellSpaceName": null,
+            "cellSpaceName": "room_start",
             "level": "1",
             "poi": false,
             "duality": "S18",
@@ -24784,7 +24784,7 @@
         {
             "id": "C41",
             "featureType": "CellSpace",
-            "cellSpaceName": null,
+            "cellSpaceName": "6208",
             "level": "2",
             "poi": false,
             "duality": "S43",
