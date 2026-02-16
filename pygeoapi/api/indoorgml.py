@@ -135,7 +135,8 @@ def get_collection(api: API, request: APIRequest, dataset=None) -> Tuple[dict, i
         })
         if request.format == F_JSON:
             return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
-    
+
+        response['base_path'] = f"{api.config['server']['url']}"
         response['collections_path'] = f"{api.config['server']['url']}/collections"
         LOGGER.debug(f"{api.config['server']['url']}/collections")
         content = render_j2_template(
@@ -506,12 +507,12 @@ def get_collection_item(api: API, request: APIRequest, dataset, identifier) -> T
             "type": "application/geo+json",
             "title": ifeature_str_id
         })
-
+        
         response['links'].append({
-            "href": f"{api.config['server']['url']}/static/workSpace/workSpace.html",
-            "rel": "self",
-            "type": "application/json",
-            "title": "Indoorfeature Visualization"
+            'href': f"{api.config['server']['url']}/collections/{dataset}",
+            'rel': 'collection',
+            'type': 'application/geo+json',
+            'title': dataset
         })
         if request.format == F_JSON:
             return headers, HTTPStatus.OK, to_json(response, api.pretty_print)
