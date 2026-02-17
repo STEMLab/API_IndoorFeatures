@@ -59,10 +59,14 @@ body {
 }
 .search img {
   position: absolute;
-  right: 10px; /* 오른쪽 끝에서 10px 띄움 */
+  right: 10px; 
   top: 50%;
-  transform: translateY(-50%); /* 정확한 세로 중앙 정렬 */
+  transform: translateY(-50%); 
   width: 20px;
+}
+
+.hidden {
+  display: none;
 }
 
 .label {
@@ -195,4 +199,138 @@ pre {
 
 #db-list button:hover {
   background: #e9ecef;
+}
+
+.route-ui-container {
+    display: flex;
+    align-items: center;
+    background: #f8f9fa;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+/* Visual connector (The dots and line on the left) */
+.route-visuals {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-right: 10px;
+    height: 60px; /* Aligns with inputs */
+    justify-content: center;
+}
+
+.dot-start {
+    width: 10px;
+    height: 10px;
+    border: 2px solid #555;
+    border-radius: 50%;
+    background: transparent;
+}
+
+.line-connect {
+    flex-grow: 1;
+    width: 2px;
+    background: repeating-linear-gradient(to bottom, #ccc 0, #ccc 4px, transparent 4px, transparent 8px);
+    margin: 2px 0;
+}
+
+.dot-dest {
+    width: 10px;
+    height: 10px;
+    background: #d9534f; /* Red for destination */
+    border-radius: 50%;
+}
+
+/* Inputs */
+.route-inputs {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.route-inputs input {
+    width: 100%;
+    border: 1px solid transparent;
+    border-bottom: 1px solid #eee;
+    background: transparent;
+    padding: 5px;
+    font-size: 0.9em;
+}
+
+.route-inputs input:focus {
+    outline: none;
+    background: white;
+    border-bottom: 2px solid #4285f4;
+}
+
+/* Buttons */
+.btn-icon {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.2em;
+    color: #555;
+    padding: 0 5px;
+    margin-left: 5px;
+}
+
+.btn-icon:hover {
+    color: #000;
+}
+
+.route-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.btn-primary {
+    background-color: #4285f4;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    flex-grow: 1;
+}
+
+.btn-primary:disabled {
+    background-color: #a0c0f8;
+    cursor: not-allowed;
+}
+
+.btn-text {
+    background: none;
+    border: none;
+    color: #4285f4;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+}
+
+#plotResult {
+    display: none;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+#plotResult.active {
+    display: block;
+}
+
+/* Style for the result items */
+.result-item {
+    border-bottom: 1px solid #eee;
+    padding: 10px 0;
+    cursor: pointer;
+}
+.result-item:hover {
+    background-color: #f9f9f9;
+}
+.result-item strong {
+    color: #2c3e50;
+    font-size: 1.1em;
 }
