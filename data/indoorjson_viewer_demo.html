@@ -1123,6 +1123,13 @@ function render2D(){
     const xs=[],ys=[]; for(const p of s.pairs){xs.push(p[0]);ys.push(p[1]);}
     traces.push({type:"scattergl",mode:"lines",name:lvl,x:xs,y:ys,line:{width:1,color:"rgba(0,0,0,0.55)"},hoverinfo:"skip",visible:(CURRENT_LEVEL==="__all__"||CURRENT_LEVEL===lvl),meta:{role:"base",level:lvl}});
   }
+  if(RESULT2D&&RESULT2D.levels.length){
+    for(const lvl of RESULT2D.levels){
+      const s=RESULT2D.byLevel2d.get(lvl); if(!s||!s.pairs.length) continue;
+      const xs=[],ys=[]; for(const p of s.pairs){xs.push(p[0]);ys.push(p[1]);}
+      traces.push({type:"scattergl",mode:"lines",name:(lvl==="__all__")?"RESULT":`RESULT:${lvl}`,x:xs,y:ys,line:{width:3,color:"rgba(220,0,0,0.95)"},hoverinfo:"skip",visible:SHOW_RESULT&&(CURRENT_LEVEL==="__all__"||lvl==="__all__"||lvl===CURRENT_LEVEL),meta:{role:"result",level:lvl}});
+    }
+  }
   if (SHOW_DUAL && MODEL.dualEdgesByLevel){
     for (const [lvl, edges] of Object.entries(MODEL.dualEdgesByLevel)){
       if(!edges || !edges.length) continue;
