@@ -21,9 +21,15 @@ export async function getCollectionItems(url) {
 }
 
 /** Fetch a single feature by ID with a BBOX */
-export async function getSingleFeature(colId, featureId) {
-  const hugeBbox = "-1800,-900,1800,900"; 
-  const url = `${API_BASE}/collections/${colId}/items/${featureId}?f=json&bbox=${hugeBbox}`;
+export async function getSingleFeature(colId, featureId, bbox=false) {
+  const hugeBbox = "-1800,-900,1800,900";
+  let url = ""; 
+  if (bbox) {
+    url = `${API_BASE}/collections/${colId}/items/${featureId}?f=json&bbox=${hugeBbox}`;
+  }
+  else {
+    url = `${API_BASE}/collections/${colId}/items/${featureId}?f=json`;
+  }
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Fetch error: ${response.status}`);
   return await response.json();
@@ -205,4 +211,25 @@ export async function manageDualMember(colId, featId, tId, mId, method, jsonData
   const response = await fetch(url, options);
   if (!response.ok) throw new Error(`${method} Failed: ${response.status}`);
   return method === 'DELETE' ? true : await response.json();
+}
+
+export async function searchByPoi(colId, featId, tId){
+  const url = `${API_BASE}/collections/${colId}/items/${featId}/layers/${tId}/primal?f=json&poi=true`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${method} Failed: ${response.status}`);
+  return await response.json();
+}
+
+export async function searchCellSpaceByName(colId, featId, tId, cell_name){
+  const url = `${API_BASE}/collections/${colId}/items/${featId}/layers/${tId}/primal?f=json&cellSpaceName=${cell_name}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${method} Failed: ${response.status}`);
+  return await response.json();
+}
+
+export async function routingQuery(colId, featId, tId, sn, dn){
+  const url = `${API_BASE}/collections/${colId}/items/${featId}/layers/${tId}/dual/route?sn=${sn}&dn=${dn}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${method} Failed: ${response.status}`);
+  return await response.json();
 }

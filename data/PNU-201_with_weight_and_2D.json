@@ -24786,7 +24786,7 @@
             "featureType": "CellSpace",
             "cellSpaceName": "6208",
             "level": "2",
-            "poi": false,
+            "poi": true,
             "duality": "S43",
             "cellSpaceGeom": {
                 "geometry2D": {

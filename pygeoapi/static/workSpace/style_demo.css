@@ -23,16 +23,20 @@ body {
 }
 
 #side {
-  border-right:1px solid var(--border);
-  padding:14px;
-  overflow:auto;
-  background:var(--panel);
+  background: #f8f9fa;
+  border-right: 1px solid #ccc;
+  border-left: none;
+  padding: 15px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
 }
 
-#side, #side-right {
+#side-right {
   background: #f8f9fa;
-  border-right: 1px solid #ccc; /* for left side */
-  border-left: 1px solid #ccc;  /* for right side */
+  border-left: 1px solid #ccc;
+  border-right: none;
   padding: 15px;
   overflow-y: auto;
   display: flex;
@@ -123,23 +127,6 @@ button { cursor:pointer; }
   border-color: #111;
 }
 
-#plots {
-  position:absolute;
-  inset:0;
-}
-
-/* Base plot style */
-.plot {
-  display: none; /* Hide everything by default */
-  width: 100%;
-  height: 100%;
-}
-
-/* Only the active one shows */
-.plot.active {
-  display: block;
-}
-
 pre {
   white-space:pre-wrap;
   font-size:12px;
@@ -199,6 +186,11 @@ pre {
 
 #db-list button:hover {
   background: #e9ecef;
+}
+
+#db-list .active {
+  background-color: #e3f2fd;
+  border: 1px solid #2196f3;
 }
 
 .route-ui-container {
@@ -310,17 +302,6 @@ pre {
     padding: 0;
 }
 
-#plotResult {
-    display: none;
-    width: 100%;
-    height: 100%;
-    box-sizing: border-box;
-}
-
-#plotResult.active {
-    display: block;
-}
-
 /* Style for the result items */
 .result-item {
     border-bottom: 1px solid #eee;
@@ -333,4 +314,60 @@ pre {
 .result-item strong {
     color: #2c3e50;
     font-size: 1.1em;
+}
+
+/* Make plots container relative so drawer can overlay inside main */
+#main{ position:relative; }
+
+#plots{
+  position:absolute;
+  inset:0;
+}
+/* Plot tabs */
+.plot{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  display:none;
+}
+.plot.active{ display:block; }
+
+/* Drawer overlay */
+.drawer{
+  position:absolute;
+  top:12px;
+  right:12px;
+  width:min(420px, calc(100% - 24px));
+  max-height:calc(100% - 24px);
+  background:#fff;
+  border:1px solid #e6e6e6;
+  border-radius:14px;
+  box-shadow:0 10px 40px rgba(0,0,0,0.12);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  z-index:50;
+}
+.drawer.hidden{ display:none; }
+
+.drawer-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:12px;
+  border-bottom:1px solid #eee;
+  background:#fafafa;
+}
+.drawer-body{ padding:10px 12px; overflow:auto; }
+.drawer-footer{ padding:10px 12px; border-top:1px solid #eee; background:#fafafa; }
+.db-item-btn {
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
+  text-align: left;
+}
+.db-item-btn.active {
+  background-color: #e3f2fd;
+  border: 1px solid #2196f3;
 }
