@@ -111,9 +111,9 @@ class PostgresIndoorDB:
         """
         with self.connection.cursor(cursor_factory=NamedTupleCursor) as cur:
             try:
-                query = """SELECT id_str, collection_property, (SELECT ST_Extent(geojson_geometry) 
-                            FROM indoorfeature WHERE collection_id = 1) as extent_indoorfeature FROM collection WHERE id_str = %s"""
-                cur.execute(query, (collection_id,))
+                query = """SELECT id_str, collection_property, (SELECT ST_Extent(i.geojson_geometry) 
+                            FROM indoorfeature i JOIN collection c ON i.collection_id = c.id WHERE c.id_str = %s) as extent_indoorfeature FROM collection WHERE id_str = %s"""
+                cur.execute(query, (collection_id, collection_id))
                 row = cur.fetchone()
             
                 if not row:
@@ -122,7 +122,7 @@ class PostgresIndoorDB:
                 c_id = row[0]
                 props = row[1] if row[1] else {}
                 coords = row.extent_indoorfeature
-                spatial_bbox = [float(x) for x in re.findall(r"[-+]?\d*\.\d+|\d+", coords)]
+                spatial_bbox = [float(x) for x in re.findall(r"[-+]?\d*\.\d+|\d+", coords)] if coords is not None else []
                 spatial = {
                     "bbox": [
                         spatial_bbox # [minx, miny, maxx, maxy]
@@ -515,8 +515,9 @@ class PostgresIndoorDB:
                 
                 if not res:
                     # Item not found, usually returns 404 in API, but here we can just return
-                    LOGGER.warning(f"Feature {feature_id} not found.")
-                    return
+                    msg = f"Feature {feature_id} not found."
+                    LOGGER.warning(msg)
+                    raise ValueError(msg)
 
                 coll_pk, feature_pk = res
 
