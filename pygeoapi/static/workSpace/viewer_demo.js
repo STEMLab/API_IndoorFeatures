@@ -13,15 +13,17 @@ import * as api from './api.js';
 
 // Global State
 let MODEL = null;
+let ROUTE = null;
 let CURRENT_LEVEL = "__all__";
 let CURRENT_MODE = "2d";
 let SHOW_DUAL = false;
+let SHOW_ROUTE = true;
 let selectedCollectionId = null;
 let selectedFeatureId = null;
 let selectedFeatureData = null; // Store the fetched GeoJSON here
-let selectedILCId = null;
+let routeResult = null;
 let selectedLayerId = null;
-let selectedMemberId = null;
+let selectedFeatureDataAll = null;
 let selectedDualMemberId = null;
 
 const plot3d = document.getElementById("plot3d");
@@ -107,6 +109,108 @@ function buildBaseModel(indoorjson) {
   };
 }
 
+function buildRoute(obj, stitch){
+  // returns {points:[[x,y,z] or null breaks], source:"...", count:int, segments:[...]}
+  // stitch=false: trust route order/direction (directed graph outputs)
+  // stitch=true: auto-orient segments + insert breaks (good for undirected/unordered)
+
+  // 1) Your API: {type:"RouteResult", path_segments:[{geometry:{...}}, ...]}
+  if (obj && typeof obj === "object" && (obj.type === "RouteResult") && Array.isArray(obj.path_segments)) {
+    const segments = [];
+    const normPt = (p) => [p[0], p[1], (p.length>=3 ? p[2] : 0)];
+
+    if (!stitch) {
+      const pts = [];
+      for (const seg of obj.path_segments){
+        const g = seg?.geometry;
+        if (!g || !g.type || !Array.isArray(g.coordinates)) continue;
+
+        let segPts = [];
+        if (g.type === "LineString") segPts = g.coordinates.map(normPt);
+        else if (g.type === "MultiLineString") segPts = g.coordinates.flat().map(normPt);
+        else if (g.type === "Point") segPts = [normPt(g.coordinates)];
+        else if (g.type === "MultiPoint") segPts = g.coordinates.map(normPt);
+        else continue;
+
+        if (!segPts.length) continue;
+        pts.push(...segPts);
+
+        segments.push({
+          seq: seg?.seq ?? null,
+          id_str: seg?.id_str ?? null,
+          type: seg?.type ?? null,
+          cost: seg?.cost ?? null,
+          start: segPts[0],
+          end: segPts[segPts.length-1]
+        });
+      }
+      if (pts.length) return {points: pts, segments, source:"RouteResult.path_segments", count: pts.length};
+    } else {
+      const pts = [];
+      let cursor = null;
+      const EPS = 1e-6;
+
+      const dist2 = (a,b) => {
+        const dx=(a[0]-b[0]), dy=(a[1]-b[1]), dz=((a[2]??0)-(b[2]??0));
+        return dx*dx+dy*dy+dz*dz;
+      };
+      const same = (a,b) => dist2(a,b) <= EPS;
+
+      const pushBreak = () => {
+        if (pts.length && (pts[pts.length-1][0] !== null)) pts.push([null,null,null]);
+        cursor = null;
+      };
+
+      for (const seg of obj.path_segments){
+        const g = seg?.geometry;
+        if (!g || !g.type || !Array.isArray(g.coordinates)) continue;
+
+        let segPts = [];
+        if (g.type === "LineString") segPts = g.coordinates.slice();
+        else if (g.type === "MultiLineString") segPts = g.coordinates.flat();
+        else if (g.type === "Point") segPts = [g.coordinates];
+        else if (g.type === "MultiPoint") segPts = g.coordinates.slice();
+        else continue;
+
+        if (!segPts.length) continue;
+        segPts = segPts.map(normPt);
+
+        if (segPts.length >= 2 && cursor) {
+          const dStart = dist2(cursor, segPts[0]);
+          const dEnd   = dist2(cursor, segPts[segPts.length-1]);
+          if (dEnd < dStart) segPts.reverse();
+        }
+
+        if (cursor && !same(cursor, segPts[0])) pushBreak();
+        if (cursor && same(cursor, segPts[0])) segPts = segPts.slice(1);
+        if (!segPts.length) continue;
+
+        const segStart = segPts[0];
+        const segEnd = segPts[segPts.length-1];
+
+        for (const p of segPts) pts.push(p);
+
+        segments.push({
+          seq: seg?.seq ?? null,
+          id_str: seg?.id_str ?? null,
+          type: seg?.type ?? null,
+          cost: seg?.cost ?? null,
+          start: segStart,
+          end: segEnd
+        });
+
+        cursor = pts.length ? pts[pts.length-1] : null;
+        if (cursor && cursor[0] === null) cursor = null;
+      }
+
+      while (pts.length && pts[pts.length-1][0] === null) pts.pop();
+      const count = pts.filter(p=>p[0]!==null).length;
+      if (count) return {points: pts, segments, source:"RouteResult.path_segments(stitched)", count};
+    }
+    return {points: [], segments: [], source:"RouteResult(empty)", count: 0};
+  }
+}
+
 /* ---------- Rendering ---------- */
 
 function renderAll() {
@@ -143,6 +247,7 @@ function render3D() {
 
   for (const [lvl, s] of MODEL.byLevel3d.entries()) {
     if (!s || !s.i.length) continue;
+    console.log("pushed");
     traces.push({
       type: "mesh3d", name: lvl, x: s.x, y: s.y, z: s.z, i: s.i, j: s.j, k: s.k,
       opacity: 0.5, hoverinfo: "name", visible: (CURRENT_LEVEL === "__all__" || CURRENT_LEVEL === lvl)
@@ -179,6 +284,20 @@ function render3D() {
     if (nx.length) traces.push({ type: "scatter3d", mode: "markers", name: "Nodes", x: nx, y: ny, z: nz, marker: { size: 4, color: "#f1c40f" } });
     if (ex.length) traces.push({ type: "scatter3d", mode: "lines", name: "Edges", x: ex, y: ey, z: ez, line: { color: "#e74c3c", width: 4 } });
   }
+  if(ROUTE&&ROUTE.points&&ROUTE.points.length>=2){
+    const xs=ROUTE.points.map(p=>p[0]), ys=ROUTE.points.map(p=>p[1]), zs=ROUTE.points.map(p=>p[2]);
+    var nodeColors = [];
+    for (var i = 0; i < xs.length; i++) {
+      if (i === 0) {
+          nodeColors.push("green");           // First Node (Start)
+      } else if (i === xs.length - 1) {
+          nodeColors.push("red");         // Last Node (Destination)
+      } else {
+          nodeColors.push("rgba(0,90,255,0)"); // Middle Nodes (Path)
+      }
+    }
+    traces.push({type:"scatter3d",mode:"lines+markers",name:"ROUTE",x:xs,y:ys,z:zs,line:{width:5,color:"rgba(0,90,255,0.95)"},marker:{size:4,color:nodeColors},hoverinfo:"skip",visible:SHOW_ROUTE,meta:{role:"route",level:"__all__"}});
+  }
 
   Plotly.newPlot(plot3d, traces, { margin: { l: 0, r: 0, t: 30, b: 0 }, scene: { aspectmode: "data" } });
 }
@@ -203,9 +322,7 @@ function render2D() {
     hovermode: 'closest' // Crucial for clicking thin lines accurately
   };
 
-  Plotly.newPlot(plot2d, traces, layout).then(() => {
-    attachPlotlyClick();
-  });
+  Plotly.newPlot(plot2d, traces, layout);
 }
 
 /* ---------- Events ---------- */
@@ -325,7 +442,8 @@ const statusDivs = document.querySelectorAll('.status');
 const serviceBtn = document.getElementById("indoorFeature-service-button");
 const searchDiv = document.querySelector('.search');
 const routeDiv = document.querySelector('.route');
-const viewDiv = document.querySelector(".view");
+const viewDiv = document.querySelector('.view');
+const vizStatus = document.getElementById("viz-status");
 // 1. Get Collections Handler
 document.getElementById("api-get-collections").addEventListener("click", async () => {
   try {
@@ -483,30 +601,30 @@ serviceBtn.addEventListener("click", async () => {
   }
 })
 // Visualie button handler
-// document.getElementById("visualize").addEventListener("click", () => {
-//   const status = document.getElementById("api-status-right");
+document.getElementById("visualize").addEventListener("click", () => {
+  if (!pendingCell || !selectedFeatureData) {
+    alert("Please select a feature from the list first!");
+    return;
+  }
 
-//   if (!selectedFeatureData || !selectedFeatureData.IndoorFeatures) {
-//     alert("Please select a feature from the list first!");
-//     return;
-//   }
-
-//   try {
-//     status.textContent = "Generating 3D Model...";
+  try {
+    vizStatus.textContent = "Generating 3D Model...";
     
-//     // 1. Clear existing model if necessary (depends on your geometry.js)
-//     // 2. Build the model from the stored data
-//     MODEL = buildBaseModel(selectedFeatureData.IndoorFeatures); 
+    // 1. Clear existing model if necessary (depends on your geometry.js)
+    // 2. Build the model from the stored data
+    MODEL = buildBaseModel(pendingCell); 
+    Plotly.react(plot3d, [], {});
+    Plotly.react(plot2d, [], {});
+    CURRENT_LEVEL = "__all__";
+    // 3. Trigger the 3D Render
+    renderAll();
     
-//     // 3. Trigger the 3D Render
-//     renderAll();
-    
-//     status.textContent = `Visualizing: ${selectedFeatureId}`;
-//   } catch (err) {
-//     console.error("Visualization Error:", err);
-//     status.textContent = "Error during visualization.";
-//   }
-// });
+    vizStatus.textContent = `Visualizing: ${selectedFeatureId}`;
+  } catch (err) {
+    console.error("Visualization Error:", err);
+    vizStatus.textContent = "Error during visualization.";
+  }
+});
 const poiBtn = document.getElementById("btn-poi");
 
 const drawerEl = document.getElementById("results-drawer");
@@ -518,12 +636,15 @@ const drawerCloseBtn = document.getElementById("drawer-close");
 const drawerOpenBtn = document.getElementById("btn-directions")
 
 let pickingRouteField = null; // "start" | "dest"
+let pendingCell = null;
 let selectedStartNode = null;
 let selectedDestNode = null;
 
 const startInput = document.getElementById("route-start-input");
 const destInput  = document.getElementById("route-dest-input");
-const navBtn      = document.getElementById("btn-get-route");
+const navBtn = document.getElementById("btn-get-route");
+const routeStatus = document.getElementById("route-status");
+const vizAllBtn = document.getElementById("view-all");
 
 function openDrawer(title, subtitle) {
   const drawer = document.getElementById("results-drawer");
@@ -533,17 +654,17 @@ function openDrawer(title, subtitle) {
   drawer.setAttribute("aria-hidden", "false");
 }
 
-startInput.addEventListener("click", () => {
-  pickingRouteField = "start";
-  openDrawer("Select Start", "Click a POI cell space");
-  // you can call your search + render here if needed
-});
+function onCellResultClicked(cs, clickedBtn) {
+  // highlight selected result
+  document.querySelectorAll("#result-list .db-item-btn").forEach(b => b.classList.remove("active"));
+  clickedBtn.classList.add("active");
 
-destInput.addEventListener("click", () => {
-  pickingRouteField = "dest";
-  openDrawer("Select Destination", "Click a POI cell space");
-  // you can call your search + render here if needed
-});
+  pendingCell = cs;
+  viewDiv.classList.remove('hidden');
+  const label = cs.cellSpaceName ?? cs.id;
+  routeStatus.textContent = `Selected "${label}". Now click Start or Destination to assign.`;
+}
+
 function debounce(fn, wait = 300) {
   let t;
   return (...args) => {
@@ -552,54 +673,6 @@ function debounce(fn, wait = 300) {
   };
 }
 
-// function handleSelectCellSpace(cs, clickedBtn) {
-
-//   document.querySelectorAll("#result-list .db-item-btn").forEach(b => {
-//     const isSelected = (b === clickedBtn);
-//     b.classList.toggle("hidden", !isSelected);
-//     b.classList.toggle("active", isSelected);
-//   });
-
-//   console.log("Selected CellSpace:", cs);
-// }
-
-// function renderCellSpaceMembers(poiList, onSelect) {
-//   const drawer = document.getElementById("results-drawer");
-//   const resultList = document.getElementById("result-list");
-//   const title = document.getElementById("drawer-title");
-//   const subtitle = document.getElementById("drawer-subtitle");
-
-//   resultList.innerHTML = ""; // clear old results
-
-//   const cellSpaces = poiList?.cellSpaceMember ?? [];
-
-//   if (!cellSpaces.length) {
-//     resultList.textContent = "No POI cell spaces found.";
-//     return;
-//   }
-
-//   // Update drawer header
-//   title.textContent = "POI Results";
-//   subtitle.textContent = `${cellSpaces.length} cell space(s) found`;
-
-//   // Show drawer
-//   drawer.classList.remove("hidden");
-//   drawer.setAttribute("aria-hidden", "false");
-
-//   cellSpaces.forEach(cs => {
-//     const btn = document.createElement("button");
-//     btn.className = "db-item-btn";
-
-//     btn.innerHTML = `
-//       <strong>📍 ${cs.cellSpaceName ?? cs.id}</strong>
-//       <div class="tiny">ID: ${cs.id} | Level: ${cs.level}</div>
-//     `;
-
-//     btn.addEventListener("click", () => onSelect(cs, btn));
-
-//     resultList.appendChild(btn);
-//   });
-// }
 const nameInput  = document.getElementById("poi-name-input");
 const nameStatus = document.getElementById("poi-name-status");
 const runNameSearch = debounce(async () => {
@@ -619,8 +692,6 @@ const runNameSearch = debounce(async () => {
       `Query: "${q}"`
     );
 
-    // ✅ TODO: replace with YOUR real API call
-    // Expected: returns { cellSpaceMember: [...] } OR just an array
     const result = await api.searchCellSpaceByName(selectedCollectionId, selectedFeatureId, selectedLayerId, q);
 
     renderCellSpaceResultsToDrawer(result);
@@ -654,41 +725,11 @@ function renderCellSpaceResultsToDrawer(poiList) {
       <div class="tiny">ID: ${cs.id} | Level: ${cs.level ?? "-"}</div>
     `;
 
-    btn.addEventListener("click", () => {
-      // keep it highlighted
-      document.querySelectorAll("#result-list .db-item-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-
-      const label = cs.cellSpaceName ?? cs.id;
-
-      if (pickingRouteField === "start") {
-        startInput.value = label;
-        selectedStartNode = cs.duality;
-      } else if (pickingRouteField === "dest") {
-        destInput.value = label;
-        selectedDestNode = cs.duality;
-      } else {
-        // If user didn’t pick start/dest, decide default behavior:
-        // Option 1: ask user to click start/dest field first
-        document.getElementById("drawer-footer").textContent =
-          "Click 'Choose starting point' or 'Choose destination' first.";
-        return;
-      }
-
-      navBtn.disabled = !(selectedStartNode && selectedDestNode);
-    });
+    btn.addEventListener("click", () => onCellResultClicked(cs, btn));
 
     resultList.appendChild(btn);
   });
 }
-
-function focusNameSearch() {
-  const el = document.getElementById("poi-name-input");
-  if (el) el.focus();
-}
-
-startInput.addEventListener("click", focusNameSearch);
-destInput.addEventListener("click", focusNameSearch);
 
 function renderPoiToDrawer(poiList) {
   const resultList = document.getElementById("result-list");
@@ -711,43 +752,42 @@ function renderPoiToDrawer(poiList) {
       <div class="tiny">ID: ${cs.id} | Level: ${cs.level ?? "-"}</div>
     `;
 
-    btn.addEventListener("click", () => {
-      // keep selected blue
-      document.querySelectorAll("#result-list .db-item-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-
-      const label = cs.cellSpaceName ?? cs.id;
-
-      if (pickingRouteField === "start") {
-        startInput.value = label;
-        selectedStartNode = cs.duality;
-      } else if (pickingRouteField === "dest") {
-        destInput.value = label;
-        selectedDestNode = cs.duality;
-      } else {
-        // user clicked POI without choosing start/dest
-        document.getElementById("drawer-footer").textContent =
-          "Click 'Choose starting point' or 'Choose destination' first.";
-        return;
-      }
-
-      // enable Navigate if both selected
-      navBtn.disabled = !(selectedStartNode && selectedDestNode);
-
-      // optional: close drawer after selection
-      // document.getElementById("results-drawer").classList.add("hidden");
-    });
+    btn.addEventListener("click", () => onCellResultClicked(cs, btn));
 
     resultList.appendChild(btn);
   });
 }
 
+function assignPendingTo(which) {
+  if (!pendingCell) {
+    routeStatus.textContent = "Select a cell space from search results first.";
+    return;
+  }
+
+  const label = pendingCell.cellSpaceName ?? pendingCell.id;
+
+  if (which === "start") {
+    selectedStartNode = pendingCell.duality;
+    startInput.value = label;
+    routeStatus.textContent = `Start set to "${label}".`;
+  } else {
+    selectedDestNode = pendingCell.duality;
+    destInput.value = label;
+    routeStatus.textContent = `Destination set to "${label}".`;
+  }
+
+  navBtn.disabled = !(selectedStartNode && selectedDestNode);
+}
+
+startInput.addEventListener("click", () => assignPendingTo("start"));
+destInput.addEventListener("click", () => assignPendingTo("dest"));
 
 poiBtn.addEventListener("click", async () => {
   try {
     const poiList = await api.searchByPoi(selectedCollectionId, selectedFeatureId, selectedLayerId)
     // MODEL = buildBaseModel(poiList);
     // renderAll();
+    openDrawer("List of Poi cell spaces", "Click a cell space");
     renderPoiToDrawer(poiList);
     apiLog.textContent = JSON.stringify(poiList, null, 2);
   } catch (err){
@@ -768,12 +808,36 @@ const routeBtn = document.getElementById("btn-get-route");
 
 routeBtn.addEventListener("click", async () => {
   try {
-    const result = await api.routingQuery(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedStartNode, selectedDestNode);
+    routeResult = await api.routingQuery(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedStartNode, selectedDestNode);
 
-    apiLog.textContent = JSON.stringify(result, null, 2);
-    viewDiv.classList.remove('hidden');
+    apiLog.textContent = JSON.stringify(routeResult, null, 2);
+    vizAllBtn.classList.remove('hidden');
   } catch (err) {
     apiLog.textContent = "Error: " + err.message;
   }
   
+})
+
+vizAllBtn.addEventListener("click", async () => {
+  if (!selectedFeatureData || !routeResult) return;
+
+  try {
+    selectedFeatureDataAll = await api.getSingleFeature(selectedCollectionId, selectedFeatureId, true);
+    vizStatus.textContent = "Generating 3D Model...";
+    
+    // 1. Clear existing model if necessary (depends on your geometry.js)
+    // 2. Build the model from the stored data
+    MODEL = buildBaseModel(selectedFeatureDataAll.IndoorFeatures); 
+    ROUTE = buildRoute(routeResult, true);
+    Plotly.react(plot3d, [], {});
+    Plotly.react(plot2d, [], {});
+    CURRENT_LEVEL = "__all__";
+    // 3. Trigger the 3D Render
+    renderAll();
+    
+    vizStatus.textContent = `Visualizing: ${selectedFeatureId}`;
+  
+  } catch (err) {
+    apiLog.textContent = "Error: " + err.message;
+  }
 })

@@ -27,6 +27,7 @@ export function iterCellSpaces(obj) {
   if (!obj || typeof obj !== "object") return out;
 
   // Standard members
+  if (obj?.featureType === "CellSpace") out.push(obj);
   if (Array.isArray(obj.cellSpaceMember)) out.push(...obj.cellSpaceMember);
   if (Array.isArray(obj?.primalSpace?.cellSpaceMember)) out.push(...obj.primalSpace.cellSpaceMember);
 
@@ -39,6 +40,8 @@ export function iterCellSpaces(obj) {
   }
 
   const seen = new Set(), dedup = [];
+  console.log(obj);
+  console.log(out);
   for (const cs of out) {
     const id = cs?.id ? String(cs.id) : null;
     if (id && seen.has(id)) continue;
