@@ -48,29 +48,6 @@
       </div>
     </div>
 
-    <div class="block view hidden">
-    <!-- View tabs (keep) -->
-    <div class="block">
-      <div class="label">View</div>
-      <div id="tabs">
-        <button id="btn3d" class="active">3D</button>
-        <button id="btn2d">2D</button>
-      </div>
-    </div>
-
-    <!-- Level + dual toggle -->
-    <div class="block">
-      <div class="label">Level</div>
-      <select id="level">
-        <option value="__all__">All</option>
-      </select>
-      <div class="checkrow" style="margin-top:8px;">
-        <input id="toggleDual" type="checkbox"/>
-        <label for="toggleDual">Show dual graph (nodes & edges)</label>
-      </div>
-    </div>
-    </div>
-
     <!-- Directions panel (STARTS HIDDEN; opened by Directions button) -->
     <div class="block route hidden" id="route-panel">
       <div class="label" style="display:flex; justify-content:space-between; align-items:center;">
@@ -119,6 +96,31 @@
       <div class="tiny" style="margin-top:6px;">
         POI shows results in a drawer. Directions opens a route panel.
       </div>
+    </div>
+    <div class="block view hidden">
+    <!-- View tabs (keep) -->
+    <div class="block">
+      <div class="label">View</div>
+      <div id="tabs">
+        <button id="btn3d" class="active">3D</button>
+        <button id="btn2d">2D</button>
+      </div>
+    </div>
+
+    <!-- Level + dual toggle -->
+    <div class="block">
+      <div class="label">Level</div>
+      <select id="level">
+        <option value="__all__">All</option>
+      </select>
+      <div class="checkrow" style="margin-top:8px;">
+        <input id="toggleDual" type="checkbox"/>
+        <label for="toggleDual">Show dual graph (nodes & edges)</label>
+      </div>
+    </div>
+    <button id="visualize" style="margin-top: 8px; width: 100%;">Visualize</button>
+    <button id="view-all"  style="margin-top: 8px; width: 100%;" class="hidden">Visualize All</button>
+    <div id="viz-status" class="tiny" style="margin-top:4px;"></div>
     </div>
 
     

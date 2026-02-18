@@ -32,6 +32,7 @@ export async function getSingleFeature(colId, featureId, bbox=false) {
   }
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Fetch error: ${response.status}`);
+  console.log(response)
   return await response.json();
 }
 
