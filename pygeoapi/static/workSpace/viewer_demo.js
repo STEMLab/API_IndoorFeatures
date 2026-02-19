@@ -6,7 +6,11 @@ import {
   polygon2dToRings,
   polyhedronToTris,
   bboxFromPoints,
-  pushRingPairs
+  pushRingPairs,
+  computeLevelZ,
+  bucketDualEdgesByLevel,
+  bucketDualNodesByLevel,
+  route2DForLevel
 } from "./geometry.js";
 
 import * as api from './api.js';
@@ -22,6 +26,7 @@ let selectedCollectionId = null;
 let selectedFeatureId = null;
 let selectedFeatureData = null; // Store the fetched GeoJSON here
 let routeResult = null;
+let connResult = null;
 let selectedLayerId = null;
 let selectedFeatureDataAll = null;
 let selectedDualMemberId = null;
@@ -228,8 +233,9 @@ function renderAll() {
   
   render3D();
   render2D();
-  const gd = getActivePlotEl();
-  if (gd && gd.data) Plotly.Plots.resize(gd);
+  // const gd = getActivePlotEl();
+  // console.log(gd);
+  // if (gd && gd.data) Plotly.Plots.resize(gd);
 }
 
 function render3D() {
@@ -247,7 +253,6 @@ function render3D() {
 
   for (const [lvl, s] of MODEL.byLevel3d.entries()) {
     if (!s || !s.i.length) continue;
-    console.log("pushed");
     traces.push({
       type: "mesh3d", name: lvl, x: s.x, y: s.y, z: s.z, i: s.i, j: s.j, k: s.k,
       opacity: 0.5, hoverinfo: "name", visible: (CURRENT_LEVEL === "__all__" || CURRENT_LEVEL === lvl)
@@ -282,7 +287,7 @@ function render3D() {
     });
 
     if (nx.length) traces.push({ type: "scatter3d", mode: "markers", name: "Nodes", x: nx, y: ny, z: nz, marker: { size: 4, color: "#f1c40f" } });
-    if (ex.length) traces.push({ type: "scatter3d", mode: "lines", name: "Edges", x: ex, y: ey, z: ez, line: { color: "#e74c3c", width: 4 } });
+    if (ex.length) traces.push({ type: "scatter3d", mode: "lines", name: "Edges", x: ex, y: ey, z: ez, line: { color: "#e74c3c", width: 3 } });
   }
   if(ROUTE&&ROUTE.points&&ROUTE.points.length>=2){
     const xs=ROUTE.points.map(p=>p[0]), ys=ROUTE.points.map(p=>p[1]), zs=ROUTE.points.map(p=>p[2]);
@@ -310,10 +315,100 @@ function render2D() {
     const s = MODEL.byLevel2d.get(lvl);
     if (!s || !s.pairs.length) continue;
     traces.push({
-      type: "scattergl", mode: "lines", name: lvl, x: s.pairs.map(p => p[0]), y: s.pairs.map(p => p[1]),
+      type: "scattergl", mode: "lines", name: `LEVEL_${lvl}`, x: s.pairs.map(p => p[0]), y: s.pairs.map(p => p[1]),
       customdata: s.ids, line: { width: 1, color: "#333333", simplify: false },
       hoverinfo: "all", visible: (CURRENT_LEVEL === "__all__" || CURRENT_LEVEL === lvl)
     });
+  }
+  if (SHOW_DUAL && MODEL.dualEdgesByLevel){
+    for (const [lvl, edges] of Object.entries(MODEL.dualEdgesByLevel)){
+      if(!edges || !edges.length) continue;
+
+      const ex=[], ey=[];
+      for(const e of edges){
+        const coords = e?.geometry?.coordinates;
+        if(!Array.isArray(coords) || coords.length < 2) continue;
+
+        for(const p of coords){
+          if(!Array.isArray(p) || p.length < 2) continue;
+          ex.push(p[0]); ey.push(p[1]);
+        }
+        ex.push(null); ey.push(null); // break between edges
+      }
+      if(!ex.length) continue;
+
+      traces.push({
+        type:"scattergl",
+        mode:"lines",
+        name:`DUAL_EDGES_${lvl}`,
+        x:ex, y:ey,
+        line:{width:2, color:"rgba(255,120,0,0.65)"},
+        hoverinfo:"skip",
+        visible:(CURRENT_LEVEL==="__all__" || CURRENT_LEVEL===lvl),
+        meta:{role:"dual", level:lvl, kind:"edge"}
+      });
+    }
+  }
+
+  if (SHOW_DUAL && MODEL.dualNodesByLevel){
+    for (const [lvl, nodes] of Object.entries(MODEL.dualNodesByLevel)){
+      if(!nodes || !nodes.length) continue;
+
+      const nx=[], ny=[], hover=[];
+      for(const n of nodes){
+        const c = n?.geometry?.coordinates;
+        if(!Array.isArray(c) || c.length < 2) continue;
+        nx.push(c[0]); ny.push(c[1]);
+        hover.push(`Node ${n.id ?? ""}${n.duality ? ` (duality ${n.duality})` : ""} z=${c[2] ?? ""}`);
+      }
+      if(!nx.length) continue;
+
+      traces.push({
+        type:"scattergl",
+        mode:"markers",
+        name:`DUAL_NODES_${lvl}`,
+        x:nx, y:ny,
+        marker:{size:8, color:"rgba(255,120,0,0.95)"},
+        hovertext:hover, hoverinfo:"text",
+        visible:(CURRENT_LEVEL==="__all__" || CURRENT_LEVEL===lvl),
+        meta:{role:"dual", level:lvl, kind:"node"}
+      });
+    }
+  }
+  if(ROUTE && ROUTE.points && ROUTE.points.length >= 2){
+    const { xs, ys } = route2DForLevel(
+      ROUTE.points,
+      MODEL.levelZ || {},
+      CURRENT_LEVEL
+    );
+
+    // Only draw if there is something on this level (or __all__)
+    const hasAny = xs.some(v => v !== null && v !== undefined);
+    if(hasAny){
+      var nodeColors = [];
+      for (var i = 0; i < xs.length; i++) {
+        if (i === 0) {
+            nodeColors.push("green");           // First Node (Start)
+        } else if (i === xs.length - 1) {
+            nodeColors.push("red");         // Last Node (Destination)
+        } else {
+            nodeColors.push("rgba(0,90,255,0)"); // Middle Nodes (Path)
+        }
+      }
+
+      traces.push({
+        type:"scattergl",
+        mode:"lines+markers",
+        name:"ROUTE",
+        x: xs,
+        y: ys,
+        line:{width:3,color:"rgba(0,90,255,0.95)"},
+        marker:{size:5,color:nodeColors},
+        hoverinfo:"skip",
+        visible:SHOW_ROUTE,
+        meta:{role:"route",level:"__all__"} // route is global; filtering is baked into x/y
+      });
+    }
   }
   const layout = {
     xaxis: { scaleanchor: "y", zeroline: false, constrain: "domain" },
@@ -444,6 +539,7 @@ const searchDiv = document.querySelector('.search');
 const routeDiv = document.querySelector('.route');
 const viewDiv = document.querySelector('.view');
 const vizStatus = document.getElementById("viz-status");
+
 // 1. Get Collections Handler
 document.getElementById("api-get-collections").addEventListener("click", async () => {
   try {
@@ -630,10 +726,9 @@ const poiBtn = document.getElementById("btn-poi");
 const drawerEl = document.getElementById("results-drawer");
 const drawerTitleEl = document.getElementById("drawer-title");
 const drawerSubtitleEl = document.getElementById("drawer-subtitle");
-const drawerBodyEl = document.getElementById("drawer-body");
 const drawerFooterEl = document.getElementById("drawer-footer");
 const drawerCloseBtn = document.getElementById("drawer-close");
-const drawerOpenBtn = document.getElementById("btn-directions")
+const connectedBtn = document.getElementById("btn-connected");
 
 let pickingRouteField = null; // "start" | "dest"
 let pendingCell = null;
@@ -648,8 +743,8 @@ const vizAllBtn = document.getElementById("view-all");
 
 function openDrawer(title, subtitle) {
   const drawer = document.getElementById("results-drawer");
-  document.getElementById("drawer-title").textContent = title;
-  document.getElementById("drawer-subtitle").textContent = subtitle ?? "—";
+  drawerTitleEl.textContent = title;
+  drawerSubtitleEl.textContent = subtitle ?? "—";
   drawer.classList.remove("hidden");
   drawer.setAttribute("aria-hidden", "false");
 }
@@ -715,7 +810,7 @@ function renderCellSpaceResultsToDrawer(poiList) {
     return;
   }
 
-  document.getElementById("drawer-subtitle").textContent = `${cells.length} result(s) found`;
+  drawerSubtitleEl.textContent = `${cells.length} result(s) found`;
 
   cells.forEach(cs => {
     const btn = document.createElement("button");
@@ -742,7 +837,7 @@ function renderPoiToDrawer(poiList) {
     return;
   }
 
-  document.getElementById("drawer-subtitle").textContent = `${cells.length} cell space(s) found`;
+  drawerSubtitleEl.textContent = `${cells.length} cell space(s) found`;
 
   cells.forEach(cs => {
     const btn = document.createElement("button");
@@ -765,7 +860,7 @@ function assignPendingTo(which) {
   }
 
   const label = pendingCell.cellSpaceName ?? pendingCell.id;
-
+  selectedDualMemberId = pendingCell.duality;
   if (which === "start") {
     selectedStartNode = pendingCell.duality;
     startInput.value = label;
@@ -799,7 +894,7 @@ poiBtn.addEventListener("click", async () => {
 function closeDrawer(){
   if (!drawerEl) return;
   drawerEl.classList.add("hidden");
-  drawerBodyEl.innerHTML = "";
+  document.getElementById("result-list").innerHTML = "";
   drawerFooterEl.textContent = "";
 }
 drawerCloseBtn?.addEventListener("click", closeDrawer);
@@ -829,6 +924,14 @@ vizAllBtn.addEventListener("click", async () => {
     // 2. Build the model from the stored data
     MODEL = buildBaseModel(selectedFeatureDataAll.IndoorFeatures); 
     ROUTE = buildRoute(routeResult, true);
+    const { levelZ, levelSpacing } = computeLevelZ(selectedFeatureDataAll.IndoorFeatures);
+    const { dualNodesByLevel, nodeLevel } = bucketDualNodesByLevel(selectedFeatureDataAll.IndoorFeatures, levelZ);
+    const { dualEdgesByLevel, interLevelEdges } = bucketDualEdgesByLevel(selectedFeatureDataAll.IndoorFeatures, levelZ);
+    MODEL.levelZ = levelZ;
+    MODEL.levelSpacing = levelSpacing;
+    MODEL.dualNodesByLevel = dualNodesByLevel;
+    MODEL.dualEdgesByLevel = dualEdgesByLevel;
+    MODEL.interLevelEdges = interLevelEdges;
     Plotly.react(plot3d, [], {});
     Plotly.react(plot2d, [], {});
     CURRENT_LEVEL = "__all__";
@@ -837,6 +940,15 @@ vizAllBtn.addEventListener("click", async () => {
     
     vizStatus.textContent = `Visualizing: ${selectedFeatureId}`;
   
+  } catch (err) {
+    apiLog.textContent = "Error: " + err.message;
+  }
+})
+
+connectedBtn.addEventListener("click", async () => {
+  try {
+    connResult = await api.getConnected(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedDualMemberId);
+    apiLog.text = JSON.stringify(connResult, null, 2);
   } catch (err) {
     apiLog.textContent = "Error: " + err.message;
   }

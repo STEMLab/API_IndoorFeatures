@@ -40,8 +40,6 @@ export function iterCellSpaces(obj) {
   }
 
   const seen = new Set(), dedup = [];
-  console.log(obj);
-  console.log(out);
   for (const cs of out) {
     const id = cs?.id ? String(cs.id) : null;
     if (id && seen.has(id)) continue;
@@ -189,4 +187,245 @@ export function bboxFromPoints(points) {
     maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]);
   }
   return Number.isFinite(minX) ? { min: [minX, minY], max: [maxX, maxY] } : null;
+}
+
+export function computeLevelZ(indoorjson){
+  // level -> array of observed base-z values (one per CellSpace)
+  const zByLevel = new Map();
+
+  // Helper: walk nested arrays and collect [x,y,z] triples
+  function collectZFromPolyhedronCoordinates(coords, out){
+    // coords shape in your example:
+    // Polyhedron -> [ [ face1, face2, ... ] ]
+    // face -> [ [x,y,z], [x,y,z], ... ]
+    if(!Array.isArray(coords)) return;
+
+    // Generic deep walk: when we see a triplet of numbers, treat as vertex
+    const stack = [coords];
+    while(stack.length){
+      const cur = stack.pop();
+      if(!Array.isArray(cur)) continue;
+
+      if(cur.length === 3 &&
+         typeof cur[0] === "number" &&
+         typeof cur[1] === "number" &&
+         typeof cur[2] === "number"){
+        out.push(cur[2]);
+        continue;
+      }
+      for(let i=0;i<cur.length;i++) stack.push(cur[i]);
+    }
+  }
+
+  // Your file already has iterCellSpaces(); reuse it if available.
+  // Otherwise, use a conservative fallback via deepFind.
+  const cellSpaces = (typeof iterCellSpaces === "function")
+    ? Array.from(iterCellSpaces(indoorjson))
+    : (function fallback(){
+        const found = [];
+        (function walk(o){
+          if(!o || typeof o !== "object") return;
+          if(o.featureType === "CellSpace") found.push(o);
+          for(const k in o) walk(o[k]);
+        })(indoorjson);
+        return found;
+      })();
+
+  for(const cs of cellSpaces){
+    const level = cs.level != null ? String(cs.level) : null;
+    if(!level) continue;
+
+    const g3 = cs?.cellSpaceGeom?.geometry3D;
+    const coords = g3?.coordinates;
+    if(!coords) continue;
+
+    const zVals = [];
+    collectZFromPolyhedronCoordinates(coords, zVals);
+    if(!zVals.length) continue;
+
+    // Base floor z for this cell (robust for your "0..20" extrusion example)
+    const baseZ = Math.min(...zVals);
+
+    if(!zByLevel.has(level)) zByLevel.set(level, []);
+    zByLevel.get(level).push(baseZ);
+  }
+
+  // median helper
+  function median(arr){
+    const a = arr.slice().sort((x,y)=>x-y);
+    const n = a.length;
+    if(n === 0) return null;
+    const mid = Math.floor(n/2);
+    return (n % 2) ? a[mid] : (a[mid-1] + a[mid]) / 2;
+  }
+
+  // Build levelZ
+  const levelZ = {};
+  const levelsSorted = Array.from(zByLevel.keys()).sort((a,b)=>Number(a)-Number(b));
+
+  for(const lvl of levelsSorted){
+    const m = median(zByLevel.get(lvl));
+    if(m != null) levelZ[lvl] = m;
+  }
+
+  // Typical spacing (median delta between consecutive levelZs)
+  const zList = levelsSorted.map(lvl => levelZ[lvl]).filter(z => typeof z === "number");
+  const deltas = [];
+  for(let i=1;i<zList.length;i++){
+    deltas.push(Math.abs(zList[i] - zList[i-1]));
+  }
+  const levelSpacing = deltas.length ? median(deltas) : null;
+
+  return { levelZ, levelSpacing };
+}
+
+function makeSnapper(levelZ){
+  const levels = Object.keys(levelZ);
+  // Precompute for speed
+  const levelItems = levels
+    .map(lvl => ({ lvl: String(lvl), z: Number(levelZ[lvl]) }))
+    .filter(o => Number.isFinite(o.z));
+
+  // Typical spacing for tolerance (median delta)
+  const zs = levelItems.map(o => o.z).sort((a,b)=>a-b);
+  const deltas = [];
+  for(let i=1;i<zs.length;i++) deltas.push(Math.abs(zs[i]-zs[i-1]));
+  deltas.sort((a,b)=>a-b);
+  const median = (arr)=> arr.length
+    ? (arr.length%2 ? arr[(arr.length-1)/2] : (arr[arr.length/2-1]+arr[arr.length/2])/2)
+    : null;
+  const spacing = median(deltas);
+
+  // If spacing exists, allow some tolerance; else very small tolerance.
+  const tol = spacing != null ? spacing * 0.45 : 1e-6;
+
+  function snapZToLevel(z){
+    if(!Number.isFinite(z) || levelItems.length === 0) return { level: null, dist: Infinity };
+
+    let best = null;
+    let bestD = Infinity;
+    for(const it of levelItems){
+      const d = Math.abs(z - it.z);
+      if(d < bestD){
+        bestD = d;
+        best = it.lvl;
+      }
+    }
+    // If it's too far from any known levelZ, mark unknown
+    if(bestD > tol) return { level: null, dist: bestD };
+    return { level: best, dist: bestD };
+  }
+
+  return { snapZToLevel, tol, spacing };
+}
+
+export function bucketDualNodesByLevel(indoorjson, levelZ){
+  const { snapZToLevel } = makeSnapper(levelZ);
+
+  const byLevel = {};   // level -> array of nodes
+  const nodeLevel = new Map(); // nodeId -> level (string|null)
+
+  const nodes = (typeof iterDualNodes === "function")
+    ? Array.from(iterDualNodes(indoorjson))
+    : [];
+
+  for(const n of nodes){
+    const c = n?.geometry?.coordinates;
+    const z = Array.isArray(c) && c.length >= 3 ? Number(c[2]) : NaN;
+
+    const { level } = snapZToLevel(z);
+    nodeLevel.set(n.id, level);
+
+    // keep it on the object too (optional but convenient)
+    n.__level = level;
+
+    if(level != null){
+      (byLevel[level] ||= []).push(n);
+    }
+  }
+
+  return { dualNodesByLevel: byLevel, nodeLevel };
+}
+
+export function bucketDualEdgesByLevel(indoorjson, levelZ){
+  const { snapZToLevel } = makeSnapper(levelZ);
+
+  const byLevel = {};        // level -> array of edges (intra-level)
+  const interLevel = [];     // edges connecting different levels
+  const edgeLevels = new Map(); // edgeId -> {aLevel,bLevel}
+
+  const edges = (typeof iterDualEdges === "function")
+    ? Array.from(iterDualEdges(indoorjson))
+    : [];
+
+  for(const e of edges){
+    const coords = e?.geometry?.coordinates;
+
+    // Determine endpoint z's
+    let zA = NaN, zB = NaN;
+    if(e?.geometry?.type === "LineString" && Array.isArray(coords) && coords.length >= 2){
+      const a = coords[0];
+      const b = coords[coords.length - 1];
+      zA = Array.isArray(a) && a.length >= 3 ? Number(a[2]) : NaN;
+      zB = Array.isArray(b) && b.length >= 3 ? Number(b[2]) : NaN;
+    }
+
+    const aSnap = snapZToLevel(zA);
+    const bSnap = snapZToLevel(zB);
+
+    edgeLevels.set(e.id, { aLevel: aSnap.level, bLevel: bSnap.level });
+
+    // Store for convenience
+    e.__aLevel = aSnap.level;
+    e.__bLevel = bSnap.level;
+
+    if(aSnap.level != null && aSnap.level === bSnap.level){
+      (byLevel[aSnap.level] ||= []).push(e);
+      e.__level = aSnap.level;
+    } else {
+      interLevel.push(e);
+      e.__level = null;
+    }
+  }
+
+  return { dualEdgesByLevel: byLevel, interLevelEdges: interLevel, edgeLevels };
+}
+
+export function route2DForLevel(routePoints, levelZ, targetLevel){
+  // Returns {xs, ys} for Plotly scattergl lines, with null breaks between levels/segments.
+  const { snapZToLevel } = makeSnapper(levelZ);
+
+  const xs = [], ys = [];
+  let drawing = false;
+
+  const pushBreak = () => {
+    if (drawing){
+      xs.push(null); ys.push(null);
+      drawing = false;
+    }
+  };
+
+  for (const p of routePoints || []){
+    if (!p || p[0] === null){ // existing break from stitched routes
+      pushBreak();
+      continue;
+    }
+
+    const z = Number.isFinite(p[2]) ? p[2] : 0;
+    const { level } = snapZToLevel(z);
+
+    const ok = (targetLevel === "__all__") || (level === targetLevel);
+
+    if (ok){
+      xs.push(p[0]);
+      ys.push(p[1]);
+      drawing = true;
+    } else {
+      // crossed into another level: break the polyline
+      pushBreak();
+    }
+  }
+
+  // trailing break not required, but fine either way
+  return { xs, ys };
 }
