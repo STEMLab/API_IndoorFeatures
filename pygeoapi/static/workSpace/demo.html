@@ -90,6 +90,7 @@
               placeholder="Search CellSpace by name (e.g., 6208)"
               style="width:100%;"
         />
+        <button class="btn" id="btn-connected" style="margin-top:10px;">Connected nodes</button>
         <div class="tiny" id="poi-name-status" style="margin-top:6px; color:#666;"></div>
       </div>
 
@@ -116,6 +117,12 @@
       <div class="checkrow" style="margin-top:8px;">
         <input id="toggleDual" type="checkbox"/>
         <label for="toggleDual">Show dual graph (nodes & edges)</label>
+      </div>
+      <div class="checkrow" style="margin-top:8px;">
+      <input id="toggleRoute" type="checkbox" checked/><label for="toggleRoute">Show route</label>
+      </div>
+      <div class="checkrow" style="margin-top:8px;">
+      <input id="toggleConnected" type="checkbox" checked/><label for="toggleConnected">Show connected</label>
       </div>
     </div>
     <button id="visualize" style="margin-top: 8px; width: 100%;">Visualize</button>

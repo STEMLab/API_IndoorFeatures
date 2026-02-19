@@ -1,0 +1,55 @@
+<div id="plot" style="width:900px;height:600px;"></div>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+(() => {
+  const O = { xmin:0, xmax:4, ymin:0, ymax:4, zmin:0, zmax:4 };
+  const H = { xmin:1, xmax:3, ymin:1, ymax:3, zmin:0, zmax:4 }; // through-hole along Z
+
+  const x=[], y=[], z=[], i=[], j=[], k=[];
+  const addV = (p)=> (x.push(p[0]), y.push(p[1]), z.push(p[2]), x.length-1);
+  const addQuad = (p0,p1,p2,p3) => {
+    const v0=addV(p0), v1=addV(p1), v2=addV(p2), v3=addV(p3);
+    i.push(v0,v1); j.push(v1,v2); k.push(v2,v3); // not correct: fix below
+  };
+
+  function quad(p0,p1,p2,p3){
+    const v0=addV(p0), v1=addV(p1), v2=addV(p2), v3=addV(p3);
+    // two triangles (v0,v1,v2) and (v0,v2,v3)
+    i.push(v0); j.push(v1); k.push(v2);
+    i.push(v0); j.push(v2); k.push(v3);
+  }
+
+  // Outer side faces (x=min/max, y=min/max) unchanged
+  quad([O.xmin,O.ymin,O.zmin],[O.xmin,O.ymin,O.zmax],[O.xmin,O.ymax,O.zmax],[O.xmin,O.ymax,O.zmin]); // x=min
+  quad([O.xmax,O.ymin,O.zmin],[O.xmax,O.ymax,O.zmin],[O.xmax,O.ymax,O.zmax],[O.xmax,O.ymin,O.zmax]); // x=max
+  quad([O.xmin,O.ymin,O.zmin],[O.xmax,O.ymin,O.zmin],[O.xmax,O.ymin,O.zmax],[O.xmin,O.ymin,O.zmax]); // y=min
+  quad([O.xmin,O.ymax,O.zmin],[O.xmin,O.ymax,O.zmax],[O.xmax,O.ymax,O.zmax],[O.xmax,O.ymax,O.zmin]); // y=max
+
+  // Bottom (z=zmin) as FRAME (hole cut)
+  const zb = O.zmin;
+  quad([O.xmin,O.ymin,zb],[H.xmin,O.ymin,zb],[H.xmin,O.ymax,zb],[O.xmin,O.ymax,zb]); // left strip
+  quad([H.xmax,O.ymin,zb],[O.xmax,O.ymin,zb],[O.xmax,O.ymax,zb],[H.xmax,O.ymax,zb]); // right strip
+  quad([H.xmin,O.ymin,zb],[H.xmax,O.ymin,zb],[H.xmax,H.ymin,zb],[H.xmin,H.ymin,zb]); // bottom strip
+  quad([H.xmin,H.ymax,zb],[H.xmax,H.ymax,zb],[H.xmax,O.ymax,zb],[H.xmin,O.ymax,zb]); // top strip
+
+  // Top (z=zmax) as FRAME (hole cut)
+  const zt = O.zmax;
+  quad([O.xmin,O.ymin,zt],[O.xmin,O.ymax,zt],[H.xmin,O.ymax,zt],[H.xmin,O.ymin,zt]); // left strip (winding adjusted)
+  quad([H.xmax,O.ymin,zt],[H.xmax,O.ymax,zt],[O.xmax,O.ymax,zt],[O.xmax,O.ymin,zt]); // right strip
+  quad([H.xmin,O.ymin,zt],[H.xmin,H.ymin,zt],[H.xmax,H.ymin,zt],[H.xmax,O.ymin,zt]); // bottom strip
+  quad([H.xmin,H.ymax,zt],[H.xmin,O.ymax,zt],[H.xmax,O.ymax,zt],[H.xmax,H.ymax,zt]); // top strip
+
+  // Inner tunnel walls (the hole surfaces), spanning zmin..zmax
+  quad([H.xmin,H.ymin,O.zmin],[H.xmin,H.ymax,O.zmin],[H.xmin,H.ymax,O.zmax],[H.xmin,H.ymin,O.zmax]); // x=H.xmin
+  quad([H.xmax,H.ymin,O.zmin],[H.xmax,H.ymin,O.zmax],[H.xmax,H.ymax,O.zmax],[H.xmax,H.ymax,O.zmin]); // x=H.xmax
+  quad([H.xmin,H.ymin,O.zmin],[H.xmin,H.ymin,O.zmax],[H.xmax,H.ymin,O.zmax],[H.xmax,H.ymin,O.zmin]); // y=H.ymin
+  quad([H.xmin,H.ymax,O.zmin],[H.xmax,H.ymax,O.zmin],[H.xmax,H.ymax,O.zmax],[H.xmin,H.ymax,O.zmax]); // y=H.ymax
+
+  Plotly.newPlot("plot", [{
+    type:"mesh3d", x,y,z,i,j,k,
+    opacity: 0.55,
+    color: "steelblue",
+    lighting: { ambient:0.25, diffuse:1, specular:0.4, roughness:0.5 }
+  }], { scene:{ aspectmode:"data" }, margin:{l:0,r:0,t:0,b:0} });
+})();
+</script>
