@@ -371,3 +371,67 @@ pre {
   background-color: #e3f2fd;
   border: 1px solid #2196f3;
 }
+
+.dropdown-summary {
+  cursor: pointer;
+  font-weight: 500;
+  padding: 6px 0;
+}
+
+/* Geometric query container */
+.dropdown-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Clean sidebar-style input */
+.geo-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 14px;
+
+  background: #ffffff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Subtle hover */
+.geo-input:hover {
+  border-color: #999;
+}
+
+/* Clean focus (no flashy glow) */
+.geo-input:focus {
+  outline: none;
+  border-color: #666;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.05);
+}
+
+/* Placeholder tone */
+.geo-input::placeholder {
+  color: #888;
+}
+
+.search-btn {
+  padding: 8px 12px;
+  font-size: 14px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+
+  background: #e9ecef;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.search-btn:hover {
+  background: #dde2e6;
+  border-color: #999;
+}
+
+.search-btn:active {
+  background: #ced4da;
+}

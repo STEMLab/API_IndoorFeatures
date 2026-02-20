@@ -18,15 +18,18 @@ import * as api from './api.js';
 // Global State
 let MODEL = null;
 let ROUTE = null;
+let GEOQUERY = null;
 let CURRENT_LEVEL = "__all__";
 let CURRENT_MODE = "2d";
 let SHOW_DUAL = false;
 let SHOW_ROUTE = true;
+let SHOW_GEOQUERY = false;
 let selectedCollectionId = null;
 let selectedFeatureId = null;
 let selectedFeatureData = null; // Store the fetched GeoJSON here
 let routeResult = null;
 let connResult = null;
+let geoqueryResult = null;
 let selectedLayerId = null;
 let selectedFeatureDataAll = null;
 let selectedDualMemberId = null;
@@ -39,6 +42,8 @@ const levelSelect = document.getElementById("level");
 const btn3d = document.getElementById("btn3d");
 const btn2d = document.getElementById("btn2d");
 const toggleDual = document.getElementById("toggleDual");
+const toggleRoute = document.getElementById("toggleRoute");
+const toggleGeoquery = document.getElementById("toggleGeoquery");
 
 /* ---------- Build Model ---------- */
 
@@ -216,6 +221,70 @@ function buildRoute(obj, stitch){
   }
 }
 
+function buildOverlayModel(obj){
+  const cells = iterCellSpaces(obj);
+  const levels = new Set();
+  const byLevel3d = new Map();
+  const byLevel2d = new Map();
+  const addLevel = (lvl) => {
+    levels.add(lvl);
+    if (!byLevel3d.has(lvl)) byLevel3d.set(lvl, { x: [], y: [], z: [], i: [], j: [], k: [] });
+    if (!byLevel2d.has(lvl)) byLevel2d.set(lvl, { pairs: [], ids: [] }); // Fixed: Ensure ids exist
+  };
+
+  for (const cs of cells) {
+    const lvl = safeStr(cs.level) || safeStr(cs.storey) || "UNKNOWN";
+    addLevel(lvl);
+
+    const geom = cs.cellSpaceGeom || {};
+    const g3 = geom.geometry3D || null;
+    const g2 = geom.geometry2D || null;
+
+    if (g3 && g3.type === "Polyhedron") {
+      const tris = polyhedronToTris(g3);
+      const store = byLevel3d.get(lvl);
+      for (const tri of tris) {
+        const base = store.x.length;
+        for (const p of tri) {
+          store.x.push(p[0]); store.y.push(p[1]); store.z.push(p[2] ?? 0);
+        }
+        store.i.push(base); store.j.push(base + 1); store.k.push(base + 2);
+      }
+    }
+
+    const store2 = byLevel2d.get(lvl);
+    if (g2 && (g2.type === "Polygon" || g2.type === "MultiPolygon")) {
+      const rings = polygon2dToRings(g2);
+      // Ensure every vertex in the ring gets the ID assigned to it
+      for (const ring of rings) {
+        pushRingPairs(store2.pairs, ring); 
+        ring.forEach(() => {
+          store2.ids.push(cs.id); // Push ID for every coordinate
+        });
+        store2.ids.push(null); // Push null to match the gap in pairs
+      }
+    } else if (g3 && g3.type === "Polyhedron") {
+      const tris = polyhedronToTris(g3);
+      const pts = tris.flat();
+      const bb = bboxFromPoints(pts);
+      if (bb) {
+        const [x0, y0] = bb.min; const [x1, y1] = bb.max;
+        const ring = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
+        pushRingPairs(store2.pairs, ring);
+        ring.forEach(() => store2.ids.push(cs.id));
+        store2.ids.push(null);
+      }
+    }
+  }
+
+  return {
+    _src: obj,
+    levels: Array.from(levels).sort(),
+    byLevel3d,
+    byLevel2d
+  };
+}
+
 /* ---------- Rendering ---------- */
 
 function renderAll() {
@@ -303,7 +372,15 @@ function render3D() {
     }
     traces.push({type:"scatter3d",mode:"lines+markers",name:"ROUTE",x:xs,y:ys,z:zs,line:{width:5,color:"rgba(0,90,255,0.95)"},marker:{size:4,color:nodeColors},hoverinfo:"skip",visible:SHOW_ROUTE,meta:{role:"route",level:"__all__"}});
   }
-
+  if(SHOW_GEOQUERY && GEOQUERY) {
+    for (const [lvl, s] of GEOQUERY.byLevel3d.entries()){
+      if (!s || !s.i.length) continue;
+      traces.push({
+      type: "mesh3d", name: "Geometric Query", x: s.x, y: s.y, z: s.z, i: s.i, j: s.j, k: s.k,
+      opacity: 0.5, color: "#d62728", hoverinfo: "name", visible: SHOW_GEOQUERY
+    })
+    }
+  }
   Plotly.newPlot(plot3d, traces, { margin: { l: 0, r: 0, t: 30, b: 0 }, scene: { aspectmode: "data" } });
 }
 
@@ -319,6 +396,17 @@ function render2D() {
       customdata: s.ids, line: { width: 1, color: "#333333", simplify: false },
       hoverinfo: "all", visible: (CURRENT_LEVEL === "__all__" || CURRENT_LEVEL === lvl)
     });
+  }
+  if (SHOW_GEOQUERY && GEOQUERY) {
+    for (const lvl of GEOQUERY.levels){
+     const s = GEOQUERY.byLevel2d.get(lvl);
+     if (!s || !s.pairs.length) continue;
+     traces.push({
+      type: "scattergl", mode: "lines", name: (lvl==="__all__")?"RESULT":`RESULT:${lvl}`, x: s.pairs.map(p => p[0]), y: s.pairs.map(p => p[1]),
+      customdata: s.ids, line: { width: 3, color: "rgba(220,0,0,0.95)", simplify: false },
+      hoverinfo: "skip", visible: SHOW_GEOQUERY&&(CURRENT_LEVEL === "__all__" || CURRENT_LEVEL === lvl)
+     });
+    }  
   }
   if (SHOW_DUAL && MODEL.dualEdgesByLevel){
     for (const [lvl, edges] of Object.entries(MODEL.dualEdgesByLevel)){
@@ -532,14 +620,37 @@ const apiBack = document.getElementById("api-back");
 const apiStatus = document.getElementById("api-status-right");
 const initialDiv = document.querySelector('.initial');
 const featureDiv = document.querySelector('.feature');
-const selectedFeatureDiv = document.querySelector('.selectedFeature');
+const selectedFeatureDiv = document.querySelectorAll('.selectedFeature');
 const statusDivs = document.querySelectorAll('.status');
 const serviceBtn = document.getElementById("indoorFeature-service-button");
 const searchDiv = document.querySelector('.search');
 const routeDiv = document.querySelector('.route');
 const viewDiv = document.querySelector('.view');
 const vizStatus = document.getElementById("viz-status");
+const cellStatus = document.getElementById("cell-status");
+const poiBtn = document.getElementById("btn-poi");
+const drawerEl = document.getElementById("results-drawer");
+const drawerTitleEl = document.getElementById("drawer-title");
+const drawerSubtitleEl = document.getElementById("drawer-subtitle");
+const drawerFooterEl = document.getElementById("drawer-footer");
+const drawerCloseBtn = document.getElementById("drawer-close");
+const connectedBtn = document.getElementById("btn-connected");
+const routeBtn = document.getElementById("btn-get-route");
+const swapBtn = document.getElementById("btn-swap-route");
+const clearBtn = document.getElementById("btn-clear-route");
+const startInput = document.getElementById("route-start-input");
+const destInput  = document.getElementById("route-dest-input");
+const navBtn = document.getElementById("btn-get-route");
+const routeStatus = document.getElementById("route-status");
+const vizAllBtn = document.getElementById("view-all");
+const nameInput  = document.getElementById("poi-name-input");
+const nameStatus = document.getElementById("poi-name-status");
+const geoQueryBtn = document.getElementById("geoquery-run-btn");
 
+let pickingRouteField = null; // "start" | "dest"
+let pendingCell = null;
+let selectedStartNode = null;
+let selectedDestNode = null;
 // 1. Get Collections Handler
 document.getElementById("api-get-collections").addEventListener("click", async () => {
   try {
@@ -549,7 +660,9 @@ document.getElementById("api-get-collections").addEventListener("click", async (
     })
     console.log(statusDivs);
     featureDiv.classList.add('hidden');
-    selectedFeatureDiv.classList.add('hidden');
+    selectedFeatureDiv.forEach(div => {
+      div.classList.add('hidden');
+    })
  
     const data = await api.getIndoorCollections();
     
@@ -631,7 +744,10 @@ function renderFeatures(features, colId) {
       
       // 2. Set IDs for Delete and Post steps
       selectedFeatureId = f.id;
-      selectedFeatureDiv.classList.remove('hidden');
+      featureDiv.classList.add('hidden');
+      selectedFeatureDiv.forEach(div => {
+        div.classList.remove('hidden');
+      })
  
       document.getElementById("indoorFeature-delete-target-name").innerText = f.id;
       // Inside your renderFeatures function (right sidebar click):
@@ -696,6 +812,16 @@ serviceBtn.addEventListener("click", async () => {
     apiLog.textContent = "Error: " + err.message;
   }
 })
+toggleRoute.addEventListener("change", (e)=>{
+  SHOW_ROUTE=e.target.checked;
+  if(MODEL) renderAll();
+})
+
+toggleGeoquery.addEventListener("change", (e)=>{
+  SHOW_GEOQUERY=e.target.checked;
+  if(MODEL) renderAll();
+})
+
 // Visualie button handler
 document.getElementById("visualize").addEventListener("click", () => {
   if (!pendingCell || !selectedFeatureData) {
@@ -721,32 +847,12 @@ document.getElementById("visualize").addEventListener("click", () => {
     vizStatus.textContent = "Error during visualization.";
   }
 });
-const poiBtn = document.getElementById("btn-poi");
-
-const drawerEl = document.getElementById("results-drawer");
-const drawerTitleEl = document.getElementById("drawer-title");
-const drawerSubtitleEl = document.getElementById("drawer-subtitle");
-const drawerFooterEl = document.getElementById("drawer-footer");
-const drawerCloseBtn = document.getElementById("drawer-close");
-const connectedBtn = document.getElementById("btn-connected");
-
-let pickingRouteField = null; // "start" | "dest"
-let pendingCell = null;
-let selectedStartNode = null;
-let selectedDestNode = null;
-
-const startInput = document.getElementById("route-start-input");
-const destInput  = document.getElementById("route-dest-input");
-const navBtn = document.getElementById("btn-get-route");
-const routeStatus = document.getElementById("route-status");
-const vizAllBtn = document.getElementById("view-all");
 
 function openDrawer(title, subtitle) {
-  const drawer = document.getElementById("results-drawer");
   drawerTitleEl.textContent = title;
   drawerSubtitleEl.textContent = subtitle ?? "—";
-  drawer.classList.remove("hidden");
-  drawer.setAttribute("aria-hidden", "false");
+  drawerEl.classList.remove("hidden");
+  drawerEl.setAttribute("aria-hidden", "false");
 }
 
 function onCellResultClicked(cs, clickedBtn) {
@@ -755,12 +861,14 @@ function onCellResultClicked(cs, clickedBtn) {
   clickedBtn.classList.add("active");
 
   pendingCell = cs;
+  selectedDualMemberId = pendingCell.duality;
   viewDiv.classList.remove('hidden');
   const label = cs.cellSpaceName ?? cs.id;
+  cellStatus.textContent = `Selected Cell space: "${label}".`;
   routeStatus.textContent = `Selected "${label}". Now click Start or Destination to assign.`;
 }
 
-function debounce(fn, wait = 300) {
+function debounce(fn, wait = 500) {
   let t;
   return (...args) => {
     clearTimeout(t);
@@ -768,8 +876,7 @@ function debounce(fn, wait = 300) {
   };
 }
 
-const nameInput  = document.getElementById("poi-name-input");
-const nameStatus = document.getElementById("poi-name-status");
+
 const runNameSearch = debounce(async () => {
   const q = nameInput.value.trim();
   if (!q) {
@@ -860,7 +967,8 @@ function assignPendingTo(which) {
   }
 
   const label = pendingCell.cellSpaceName ?? pendingCell.id;
-  selectedDualMemberId = pendingCell.duality;
+  
+  
   if (which === "start") {
     selectedStartNode = pendingCell.duality;
     startInput.value = label;
@@ -889,8 +997,6 @@ poiBtn.addEventListener("click", async () => {
     apiLog.textContent = "Error: " + err.message;
   }
 })
-
-
 function closeDrawer(){
   if (!drawerEl) return;
   drawerEl.classList.add("hidden");
@@ -899,7 +1005,7 @@ function closeDrawer(){
 }
 drawerCloseBtn?.addEventListener("click", closeDrawer);
 
-const routeBtn = document.getElementById("btn-get-route");
+
 
 routeBtn.addEventListener("click", async () => {
   try {
@@ -912,6 +1018,62 @@ routeBtn.addEventListener("click", async () => {
   }
   
 })
+swapBtn.addEventListener("click", () => {
+  const temp = startInput.value;
+  startInput.value = destInput.value;
+  destInput.value = temp;
+  const tempNode = selectedStartNode;
+  selectedStartNode = selectedDestNode;
+  selectedDestNode = tempNode;
+})
+clearBtn.addEventListener("click",()=>{
+  startInput.value = null;
+  destInput.value = null;
+  selectedStartNode = null;
+  selectedDestNode = null;
+  selectedDualMemberId = null;
+  Plotly.purge(plot3d);
+  Plotly.purge(plot2d);
+  CURRENT_LEVEL = "__all__";
+  apiLog.textContent = "";
+  cellStatus.textContent = "";
+  routeStatus.textContent = "";
+  vizStatus.textContent = "";
+  MODEL=null;
+  ROUTE=null;
+  GEOQUERY = null;
+  document.getElementById("geoquery-op-input").value = null;
+  document.getElementById("geoquery-geometry-input").value = null;
+  document.getElementById("geoquery-level-input").value = null;
+})
+
+connectedBtn.addEventListener("click", async () => {
+  try {
+    connResult = await api.getConnected(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedDualMemberId);
+    apiLog.textContent = JSON.stringify(connResult, null, 2);
+  } catch (err) {
+    apiLog.textContent = "Error: " + err.message;
+  }
+})
+
+geoQueryBtn.addEventListener("click", async () => {
+
+    const operation = document.getElementById("geoquery-op-input").value;
+    const geometry = document.getElementById("geoquery-geometry-input").value;
+    const level = document.getElementById("geoquery-level-input").value;
+
+    if (!operation || !geometry) {
+      alert("Please select an operation and enter WKT geometry.");
+      return;
+    }
+    try {
+      geoqueryResult = await api.geometricQuery(selectedCollectionId, selectedFeatureId, selectedLayerId, operation, geometry, level);
+      apiLog.textContent = JSON.stringify(geoqueryResult, null, 2);
+    } catch (err) {
+      apiLog.textContent = "Error: " + err.message;
+    }
+
+});
 
 vizAllBtn.addEventListener("click", async () => {
   if (!selectedFeatureData || !routeResult) return;
@@ -923,7 +1085,8 @@ vizAllBtn.addEventListener("click", async () => {
     // 1. Clear existing model if necessary (depends on your geometry.js)
     // 2. Build the model from the stored data
     MODEL = buildBaseModel(selectedFeatureDataAll.IndoorFeatures); 
-    ROUTE = buildRoute(routeResult, true);
+    ROUTE = buildRoute(routeResult, false);
+    GEOQUERY = buildOverlayModel(geoqueryResult);
     const { levelZ, levelSpacing } = computeLevelZ(selectedFeatureDataAll.IndoorFeatures);
     const { dualNodesByLevel, nodeLevel } = bucketDualNodesByLevel(selectedFeatureDataAll.IndoorFeatures, levelZ);
     const { dualEdgesByLevel, interLevelEdges } = bucketDualEdgesByLevel(selectedFeatureDataAll.IndoorFeatures, levelZ);
@@ -945,11 +1108,3 @@ vizAllBtn.addEventListener("click", async () => {
   }
 })
 
-connectedBtn.addEventListener("click", async () => {
-  try {
-    connResult = await api.getConnected(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedDualMemberId);
-    apiLog.textContent = JSON.stringify(connResult, null, 2);
-  } catch (err) {
-    apiLog.textContent = "Error: " + err.message;
-  }
-})
