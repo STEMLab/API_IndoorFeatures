@@ -1213,6 +1213,7 @@ proj AS (
   SELECT
     id,
     shell_idx,
+    ST_SetSRID(
     ST_Force2D(
       ST_GeomFromGeoJSON(
         jsonb_build_object(
@@ -1225,6 +1226,8 @@ proj AS (
           END
         )::text
       )
+    ),
+    0 
     ) AS g2d
   FROM faces
 ),
@@ -3233,7 +3236,7 @@ WHERE c.id = u.id
                     {
                         "hop": node['current_hop'],
                         "id": node['id_str'],
-                        "featureType": "node",
+                        "featureType": "Node",
                         "geometry": self.wkt_to_json(node['geom_wkt']),
                         "duality": node['duality'],
                         "connects": node['node_connects_list']
