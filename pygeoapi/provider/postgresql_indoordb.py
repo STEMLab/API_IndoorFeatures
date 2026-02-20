@@ -1194,7 +1194,60 @@ class PostgresIndoorDB:
                 ) sub
                 WHERE c.id = sub.id AND thematiclayer_id = %s;
             """
-            cur.execute(sql_projection,(layer_pk,layer_pk))
+            sql_project_shell = """
+WITH faces AS (
+  SELECT
+    c.id,
+    s.shell_idx,
+    f.face
+  FROM cell_space_n_boundary c
+  CROSS JOIN LATERAL jsonb_array_elements(c."3D_geometry"->'coordinates')
+    WITH ORDINALITY AS s(shell, shell_idx)
+  CROSS JOIN LATERAL jsonb_array_elements(s.shell) AS f(face)
+  WHERE c."3D_geometry" IS NOT NULL
+    AND c.type = 'space'
+    AND c."2D_geometry" IS NULL
+    AND c.thematiclayer_id = %s
+),
+proj AS (
+  SELECT
+    id,
+    shell_idx,
+    ST_Force2D(
+      ST_GeomFromGeoJSON(
+        jsonb_build_object(
+          'type', 'Polygon',
+          'coordinates',
+          CASE
+            -- if face is already [ring,...], keep it; else wrap to [ring]
+            WHEN jsonb_typeof(face->0->0) = 'array' THEN face
+            ELSE jsonb_build_array(face)
+          END
+        )::text
+      )
+    ) AS g2d
+  FROM faces
+),
+u AS (
+  SELECT
+    id,
+    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx = 1) ) AS ext2d,
+    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx > 1) ) AS int2d
+  FROM proj
+  GROUP BY id
+)
+UPDATE cell_space_n_boundary c
+SET "2D_geometry" =
+  CASE
+    WHEN u.int2d IS NULL THEN u.ext2d
+    ELSE ST_Difference(u.ext2d, u.int2d)
+  END
+FROM u
+WHERE c.id = u.id
+  AND c.thematiclayer_id = %s;
+
+"""
+            cur.execute(sql_project_shell,(layer_pk,layer_pk))
 
         return dual_cell, dual_boundary
             
@@ -3280,68 +3333,62 @@ class PostgresIndoorDB:
 
         return None
     
+    
     def wkt_to_json(self, wkt_text):
-        """
-        Parses WKT string into Dictionary (GeoJSON-like).
-        Supports: POINT, LINESTRING, POLYGON, MULTIPOLYGON, POLYHEDRALSURFACE.
-        """
         if not wkt_text:
             return None
 
-        wkt = wkt_text.strip().upper()
+        wkt_raw = wkt_text.strip()
+        wkt_up = wkt_raw.upper()
 
-        # Helper: "1 2 3, 4 5 6" -> [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
         def parse_coord_list(coord_str):
             points = []
             for pt in coord_str.strip().split(','):
-                nums = [float(n) for n in pt.strip().split(' ') if n]
+                # split on whitespace (handles multiple spaces)
+                nums = [float(n) for n in pt.strip().split() if n]
                 points.append(nums)
             return points
 
-        # Helper: "1 2 3" -> [1.0, 2.0, 3.0]
         def parse_single_pt(pt_str):
-            return [float(n) for n in pt_str.strip().split(' ') if n]
+            return [float(n) for n in pt_str.strip().split() if n]
 
         # --- POINT ---
-        if wkt.startswith('POINT'):
-            # Remove POINT Z (...) -> ...
-            body = re.sub(r'POINT\s*Z?\s*\(', '', wkt)[:-1]
+        if wkt_up.startswith('POINT'):
+            body = re.sub(r'POINT\s*Z?\s*\(', '', wkt_raw, flags=re.IGNORECASE)[:-1]
             return {"type": "Point", "coordinates": parse_single_pt(body)}
 
         # --- LINESTRING ---
-        elif wkt.startswith('LINESTRING'):
-            body = re.sub(r'LINESTRING\s*Z?\s*\(', '', wkt)[:-1]
+        elif wkt_up.startswith('LINESTRING'):
+            body = re.sub(r'LINESTRING\s*Z?\s*\(', '', wkt_raw, flags=re.IGNORECASE)[:-1]
             return {"type": "LineString", "coordinates": parse_coord_list(body)}
 
         # --- POLYGON ---
-        elif wkt.startswith('POLYGON'):
-            body = re.sub(r'POLYGON\s*Z?\s*\(', '', wkt)[:-1]
-            # Split rings: (...), (...)
+        elif wkt_up.startswith('POLYGON'):
+            body = re.sub(r'POLYGON\s*Z?\s*\(', '', wkt_raw, flags=re.IGNORECASE)[:-1]
             raw_rings = re.findall(r'\((.*?)\)', body)
+            # ring 0 = exterior, ring 1.. = holes (preserved!)
             return {"type": "Polygon", "coordinates": [parse_coord_list(r) for r in raw_rings]}
 
-        # --- POLYHEDRALSURFACE (Matches 'Polyhedron') ---
-        elif wkt.startswith('POLYHEDRALSURFACE'):
-            body = re.sub(r'POLYHEDRALSURFACE\s*Z?\s*\(', '', wkt)[:-1]
-            # Split faces: ((...)), ((...))
+        # --- POLYHEDRALSURFACE ---
+        elif wkt_up.startswith('POLYHEDRALSURFACE'):
+            body = re.sub(r'POLYHEDRALSURFACE\s*Z?\s*\(', '', wkt_raw, flags=re.IGNORECASE)[:-1]
             raw_faces = re.findall(r'\(\((.*?)\)\)', body)
-            # Each face is a list of rings (usually 1 ring per face)
             coords = [[parse_coord_list(face)] for face in raw_faces]
             return {"type": "Polyhedron", "coordinates": coords}
 
         # --- MULTIPOLYGON ---
-        elif wkt.startswith('MULTIPOLYGON'):
-            body = re.sub(r'MULTIPOLYGON\s*Z?\s*\(', '', wkt)[:-1]
+        elif wkt_up.startswith('MULTIPOLYGON'):
+            body = re.sub(r'MULTIPOLYGON\s*Z?\s*\(', '', wkt_raw, flags=re.IGNORECASE)[:-1]
             raw_polys = re.findall(r'\(\((.*?)\)\)', body)
-            
+
             coords = []
             for poly_str in raw_polys:
-                # Simple split for rings inside polygon
-                rings = poly_str.split('),(') 
-                poly_coords = [parse_coord_list(r.replace(')','').replace('(','')) for r in rings]
+                rings = poly_str.split('),(')
+                poly_coords = [parse_coord_list(r.replace(')', '').replace('(', '')) for r in rings]
                 coords.append(poly_coords)
-                
+
             return {"type": "MultiPolygon", "coordinates": coords}
 
         return None
+
 # endregion

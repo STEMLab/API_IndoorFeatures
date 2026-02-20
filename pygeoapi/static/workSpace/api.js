@@ -235,8 +235,12 @@ export async function routingQuery(colId, featId, tId, sn, dn){
   return await response.json();
 }
 
+export async function geometricQuery(colId, featId, tId, op, geometry, level){
+  const url = `${API_BASE}/collections/${colId}/items/${featId}/layers/${tId}/geoquery?op=${op}&geometry=${geometry}&level=${level}`;
+}
+
 export async function getConnected(colId, featId, tId, nId, hop=1){
-  const url = `${API_BASE}/collections/${colId}/items/${featId}/layers/${tId}/dual/${nId}?hop=${hop}`;
+  const url = `${API_BASE}/collections/${colId}/items/${featId}/layers/${tId}/dual/${nId}/connected?hop=${hop}`;
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${method} Failed: ${response.status}`);
   return await response.json();

@@ -93,10 +93,20 @@
         <button class="btn" id="btn-connected" style="margin-top:10px;">Connected nodes</button>
         <div class="tiny" id="poi-name-status" style="margin-top:6px; color:#666;"></div>
       </div>
-
-      <div class="tiny" style="margin-top:6px;">
-        POI shows results in a drawer. Directions opens a route panel.
+      <div class="geoquery-search" style="margin-top:10px;">
+        <input id="geoquery-op-input"
+              type="text"
+              placeholder="contains, intersects, within"
+              style="width:50%;"
+        />
+        <input id="geoquery-geometry-input"
+              type="text"
+              placeholder="WKT format"
+              style="width:50%;"
+        />
       </div>
+
+    
     </div>
     <div class="block view hidden">
     <!-- View tabs (keep) -->
