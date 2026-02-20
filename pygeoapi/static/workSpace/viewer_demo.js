@@ -948,7 +948,7 @@ vizAllBtn.addEventListener("click", async () => {
 connectedBtn.addEventListener("click", async () => {
   try {
     connResult = await api.getConnected(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedDualMemberId);
-    apiLog.text = JSON.stringify(connResult, null, 2);
+    apiLog.textContent = JSON.stringify(connResult, null, 2);
   } catch (err) {
     apiLog.textContent = "Error: " + err.message;
   }

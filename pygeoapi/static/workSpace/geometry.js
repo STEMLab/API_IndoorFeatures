@@ -151,8 +151,8 @@ export function polygon2dToRings(geom2d) {
   const coords = geom2d?.coordinates || geom2d?.Geometry2D?.coordinates;
   if (!coords) return [];
   
-  if (type === "Polygon") return [coords[0]];
-  if (type === "MultiPolygon") return coords.map(p => p[0]);
+  if (type === "Polygon") return coords;
+  if (type === "MultiPolygon") return coords.flatMap(poly => poly);
   return [];
 }
 
