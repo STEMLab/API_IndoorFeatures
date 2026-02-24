@@ -19,16 +19,15 @@ import * as api from './api.js';
 let MODEL = null;
 let ROUTE = null;
 let GEOQUERY = null;
+let BBOX = null;
 let CURRENT_LEVEL = "__all__";
 let CURRENT_MODE = "2d";
 let SHOW_DUAL = false;
 let SHOW_ROUTE = true;
-let SHOW_GEOQUERY = false;
+let SHOW_GEOQUERY = true;
 let selectedCollectionId = null;
 let selectedFeatureId = null;
 let selectedFeatureData = null; // Store the fetched GeoJSON here
-let routeResult = null;
-let connResult = null;
 let geoqueryResult = null;
 let selectedLayerId = null;
 let selectedFeatureDataAll = null;
@@ -285,6 +284,44 @@ function buildOverlayModel(obj){
   };
 }
 
+function buildBboxModel(obj, minx,miny,maxx,maxy){
+  const cells = iterCellSpaces(obj);
+  const levels = new Set();
+  const byLevel2d = new Map();
+  const addLevel = (lvl) => {
+    levels.add(lvl);
+    if (!byLevel2d.has(lvl)) byLevel2d.set(lvl, { pairs: [], ids: [] }); // Fixed: Ensure ids exist
+  };
+  const bbox = [minx,miny,maxx,maxy];
+  for (const cs of cells) {
+    const lvl = safeStr(cs.level) || safeStr(cs.storey) || "UNKNOWN";
+    addLevel(lvl);
+
+    const geom = cs.cellSpaceGeom || {};
+    const g2 = geom.geometry2D || null;
+
+    const store2 = byLevel2d.get(lvl);
+    if (g2 && (g2.type === "Polygon" || g2.type === "MultiPolygon")) {
+      const rings = polygon2dToRings(g2);
+      // Ensure every vertex in the ring gets the ID assigned to it
+      for (const ring of rings) {
+        pushRingPairs(store2.pairs, ring); 
+        ring.forEach(() => {
+          store2.ids.push(cs.id); // Push ID for every coordinate
+        });
+        store2.ids.push(null); // Push null to match the gap in pairs
+      }
+    } 
+  }
+
+  return {
+    _src: obj,
+    levels: Array.from(levels).sort(),
+    byLevel2d,
+    bbox: bbox
+  };
+}
+
 /* ---------- Rendering ---------- */
 
 function renderAll() {
@@ -498,6 +535,26 @@ function render2D() {
       });
     }
   }
+
+  if(BBOX){
+    for (const lvl of BBOX.levels){
+     const s = BBOX.byLevel2d.get(lvl);
+     if (!s || !s.pairs.length) continue;
+     traces.push({
+      type: "scattergl", mode: "lines", name: (lvl==="__all__")?"RESULT":`RESULT:${lvl}`, x: s.pairs.map(p => p[0]), y: s.pairs.map(p => p[1]),
+      customdata: s.ids, line: { width: 3, color: "rgba(240, 107, 245, 0.95)", simplify: false },
+      hoverinfo: "skip", visible: (CURRENT_LEVEL === lvl)
+     });
+    const bboxList = BBOX.bbox;
+    console.log(bboxList);
+    traces.push({
+      type: "scattergl", mode: "lines", name: "bbox", x: [bboxList[0],bboxList[2],bboxList[2],bboxList[0],bboxList[0]], 
+      y: [bboxList[1],bboxList[1],bboxList[3],bboxList[3],bboxList[1]],
+      line: { width: 2, color: "rgba(251, 1, 1, 0.95)", simplify: false },
+      hoverinfo: "skip", visible: (CURRENT_LEVEL === lvl)
+    })
+    }  
+  }
   const layout = {
     xaxis: { scaleanchor: "y", zeroline: false, constrain: "domain" },
     yaxis: { zeroline: false },
@@ -646,6 +703,8 @@ const vizAllBtn = document.getElementById("view-all");
 const nameInput  = document.getElementById("poi-name-input");
 const nameStatus = document.getElementById("poi-name-status");
 const geoQueryBtn = document.getElementById("geoquery-run-btn");
+const backBtn = document.getElementById("back-btn");
+const bboxBtn = document.getElementById("bbox-run-btn");
 
 let pickingRouteField = null; // "start" | "dest"
 let pendingCell = null;
@@ -803,6 +862,7 @@ serviceBtn.addEventListener("click", async () => {
   initialDiv.classList.add('hidden');
   searchDiv.classList.remove('hidden');
   routeDiv.classList.remove('hidden');
+  viewDiv.classList.remove('hidden');
   try {
     const selectedLayers = await api.getThematicLayers(selectedCollectionId, selectedFeatureId);
     apiLog.textContent = JSON.stringify(selectedLayers, null ,2);
@@ -862,7 +922,6 @@ function onCellResultClicked(cs, clickedBtn) {
 
   pendingCell = cs;
   selectedDualMemberId = pendingCell.duality;
-  viewDiv.classList.remove('hidden');
   const label = cs.cellSpaceName ?? cs.id;
   cellStatus.textContent = `Selected Cell space: "${label}".`;
   routeStatus.textContent = `Selected "${label}". Now click Start or Destination to assign.`;
@@ -898,12 +957,12 @@ const runNameSearch = debounce(async () => {
 
     renderCellSpaceResultsToDrawer(result);
     nameStatus.textContent = "";
-    apiLog.innerText = JSON.stringify(result, null, 2);
+    apiLog.innerText = JSON.stringify(result);
   } catch (e) {
     nameStatus.textContent = `❌ ${e.message}`;
     apiLog.textContent = "Error: " + e.message;
   }
-}, 300);
+}, 800);
 
 nameInput.addEventListener("input", runNameSearch);
 
@@ -1009,10 +1068,9 @@ drawerCloseBtn?.addEventListener("click", closeDrawer);
 
 routeBtn.addEventListener("click", async () => {
   try {
-    routeResult = await api.routingQuery(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedStartNode, selectedDestNode);
-
+    const routeResult = await api.routingQuery(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedStartNode, selectedDestNode);
+    ROUTE = buildRoute(routeResult, false);
     apiLog.textContent = JSON.stringify(routeResult, null, 2);
-    vizAllBtn.classList.remove('hidden');
   } catch (err) {
     apiLog.textContent = "Error: " + err.message;
   }
@@ -1026,9 +1084,12 @@ swapBtn.addEventListener("click", () => {
   selectedStartNode = selectedDestNode;
   selectedDestNode = tempNode;
 })
-clearBtn.addEventListener("click",()=>{
+
+function clearAll(){
   startInput.value = null;
   destInput.value = null;
+  nameInput.value = null;
+  nameStatus.textContent = null;
   selectedStartNode = null;
   selectedDestNode = null;
   selectedDualMemberId = null;
@@ -1042,19 +1103,53 @@ clearBtn.addEventListener("click",()=>{
   MODEL=null;
   ROUTE=null;
   GEOQUERY = null;
+  drawerEl.classList.add("hidden");
   document.getElementById("geoquery-op-input").value = null;
   document.getElementById("geoquery-geometry-input").value = null;
   document.getElementById("geoquery-level-input").value = null;
-})
+  document.getElementById("bbox-minx").value = null;
+  document.getElementById("bbox-miny").value = null;
+  document.getElementById("bbox-maxx").value = null;
+  document.getElementById("bbox-maxy").value = null;
+  document.getElementById("bbox-level-input").value = null;
+}
+clearBtn.addEventListener("click", clearAll)
 
 connectedBtn.addEventListener("click", async () => {
+  if (!selectedDualMemberId) {
+    alert("Please select a node first.");
+    return;
+  }
   try {
-    connResult = await api.getConnected(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedDualMemberId);
+    const connResult = await api.getConnected(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedDualMemberId);
     apiLog.textContent = JSON.stringify(connResult, null, 2);
   } catch (err) {
     apiLog.textContent = "Error: " + err.message;
   }
 })
+
+bboxBtn.addEventListener("click", async () => {
+
+    const minx = document.getElementById("bbox-minx").value;
+    const miny = document.getElementById("bbox-miny").value;
+    const maxx = document.getElementById("bbox-maxx").value;
+    const maxy = document.getElementById("bbox-maxy").value;
+    const level = document.getElementById("bbox-level-input").value;
+
+    
+    if (!minx || !level) {
+      alert("bbox and level are required.");
+      return;
+    }
+    try {
+      const bboxResult = await api.getFilteredLayer(selectedCollectionId, selectedFeatureId, selectedLayerId, minx,miny,maxx,maxy, level);
+      BBOX = buildBboxModel(bboxResult,minx,miny,maxx,maxy);
+      apiLog.textContent = JSON.stringify(bboxResult);
+    } catch (err) {
+      apiLog.textContent = "Error: " + err.message;
+    }
+
+});
 
 geoQueryBtn.addEventListener("click", async () => {
 
@@ -1069,6 +1164,7 @@ geoQueryBtn.addEventListener("click", async () => {
     try {
       geoqueryResult = await api.geometricQuery(selectedCollectionId, selectedFeatureId, selectedLayerId, operation, geometry, level);
       apiLog.textContent = JSON.stringify(geoqueryResult, null, 2);
+      GEOQUERY = buildOverlayModel(geoqueryResult);
     } catch (err) {
       apiLog.textContent = "Error: " + err.message;
     }
@@ -1076,7 +1172,7 @@ geoQueryBtn.addEventListener("click", async () => {
 });
 
 vizAllBtn.addEventListener("click", async () => {
-  if (!selectedFeatureData || !routeResult) return;
+  if (!selectedFeatureData) return;
 
   try {
     selectedFeatureDataAll = await api.getSingleFeature(selectedCollectionId, selectedFeatureId, true);
@@ -1085,8 +1181,6 @@ vizAllBtn.addEventListener("click", async () => {
     // 1. Clear existing model if necessary (depends on your geometry.js)
     // 2. Build the model from the stored data
     MODEL = buildBaseModel(selectedFeatureDataAll.IndoorFeatures); 
-    ROUTE = buildRoute(routeResult, false);
-    GEOQUERY = buildOverlayModel(geoqueryResult);
     const { levelZ, levelSpacing } = computeLevelZ(selectedFeatureDataAll.IndoorFeatures);
     const { dualNodesByLevel, nodeLevel } = bucketDualNodesByLevel(selectedFeatureDataAll.IndoorFeatures, levelZ);
     const { dualEdgesByLevel, interLevelEdges } = bucketDualEdgesByLevel(selectedFeatureDataAll.IndoorFeatures, levelZ);
@@ -1106,5 +1200,14 @@ vizAllBtn.addEventListener("click", async () => {
   } catch (err) {
     apiLog.textContent = "Error: " + err.message;
   }
+})
+
+backBtn.addEventListener("click", () => {
+  clearAll();
+  selectedFeatureDataAll = null;
+  initialDiv.classList.remove('hidden');
+  searchDiv.classList.add('hidden');
+  routeDiv.classList.add('hidden');
+  viewDiv.classList.add('hidden');
 })
 

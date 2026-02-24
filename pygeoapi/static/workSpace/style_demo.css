@@ -435,3 +435,31 @@ pre {
 .search-btn:active {
   background: #ced4da;
 }
+
+.back-button {
+  /* Reduce size and center it */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom:8px;
+  float: right;
+  /* Dimensions: Auto width based on text instead of 100% */
+  padding: 8px 8px;
+
+  width: auto;
+
+  /* Typography */
+  font-size: 10px;
+  font-weight: 500;
+
+  /* Aesthetics */
+  background-color: #f1f3f4; /* Subtle gray */
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.back-button:hover {
+  background-color: #e8eaed;
+}

@@ -248,3 +248,10 @@ export async function getConnected(colId, featId, tId, nId, hop=1){
   if (!response.ok) throw new Error(`${method} Failed: ${response.status}`);
   return await response.json();
 }
+
+export async function getFilteredLayer(colId, featureId, tId, minx, miny, maxx, maxy, level) {
+  const url = `${API_BASE}/collections/${colId}/items/${featureId}/layers/${tId}?f=json&bbox=${minx},${miny},${maxx},${maxy}&level=${level}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Failed to load layers: ${response.status}`);
+  return await response.json(); 
+}

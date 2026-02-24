@@ -45,29 +45,58 @@
           <hr style="margin:15px 0;border:0;border-top:1px solid #eee;">
         </div>
         <div class="selectedFeature viewFeature hidden">
-          <button id="indoorFeature-service-button" class="search-btn">View Service</button>
+          <button id="indoorFeature-service-button" class="search-btn">View Services</button>
         </div>
       
     </div>
 
     <!-- Search controls -->
     <div class="block search hidden">
+      <button id="back-btn" class="back-button">Back</button>
       <div class="label">Search</div>
       <div id="cell-status" class="tiny" style="margin-top:8px; color:#666;"></div>
       <details class="dropdown">
         <summary class="dropdown-summary">Point of interest</summary>
         <div class="dropdown-content">
-            <button class="search-btn" id="btn-poi">Point of interest</button>
+            <button class="search-btn" id="btn-poi">Poi</button>
         </div>
       </details>
       <details class="dropdown">
-        <summary class="dropdown-summary">Search by name</summary>
+        <summary class="dropdown-summary">Search by cellSpaceName</summary>
         <div class="dropdown-content">
             <input id="poi-name-input"
               type="text"
-              placeholder="Search CellSpace by name (e.g., 6208)"
+              placeholder="Search CellSpace by name"
               style="width:100%;"/>
               <div class="tiny" id="poi-name-status" style="margin-top:6px; color:#666;"></div>
+        </div>
+      </details>
+      <details class="dropdown">
+        <summary class="dropdown-summary">Filtered by BBOX</summary>
+        <div class="dropdown-content">
+            <input id="bbox-minx"
+              type="number"
+              placeholder="min_x"
+              style="width:30%;"/>
+              <input id="bbox-miny"
+              type="number"
+              placeholder="min_y"
+              style="width:30%;"/>
+              <input id="bbox-maxx"
+              type="number"
+              placeholder="max_x"
+              style="width:30%;"/>
+              <input id="bbox-maxy"
+              type="number"
+              placeholder="max_y"
+              style="width:30%;"/>
+              <input id="bbox-level-input"
+              type="number"
+              placeholder="LEVEL"
+              class="geo-input"/>
+              <button id="bbox-run-btn" class="search-btn">
+              Run
+              </button>   
         </div>
       </details>
       <details class="dropdown">
@@ -160,7 +189,7 @@
       </div>
     </div>
     <button id="visualize" style="margin-top: 8px; width: 100%;">Visualize</button>
-    <button id="view-all"  style="margin-top: 8px; width: 100%;" class="hidden">Visualize All</button>
+    <button id="view-all"  style="margin-top: 8px; width: 100%;">Visualize All</button>
     <div id="viz-status" class="tiny" style="margin-top:4px;"></div>
     </div>
 
