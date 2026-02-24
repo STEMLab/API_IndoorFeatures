@@ -20,11 +20,14 @@ let MODEL = null;
 let ROUTE = null;
 let GEOQUERY = null;
 let BBOX = null;
+let POI = null;
 let CURRENT_LEVEL = "__all__";
 let CURRENT_MODE = "2d";
-let SHOW_DUAL = false;
+let SHOW_DUAL = true;
 let SHOW_ROUTE = true;
+let SHOW_BBOX = true;
 let SHOW_GEOQUERY = true;
+let SHOW_POI = false;
 let selectedCollectionId = null;
 let selectedFeatureId = null;
 let selectedFeatureData = null; // Store the fetched GeoJSON here
@@ -42,6 +45,7 @@ const btn3d = document.getElementById("btn3d");
 const btn2d = document.getElementById("btn2d");
 const toggleDual = document.getElementById("toggleDual");
 const toggleRoute = document.getElementById("toggleRoute");
+const toggleBbox = document.getElementById("toggleBbox");
 const toggleGeoquery = document.getElementById("toggleGeoquery");
 
 /* ---------- Build Model ---------- */
@@ -287,18 +291,34 @@ function buildOverlayModel(obj){
 function buildBboxModel(obj, minx,miny,maxx,maxy){
   const cells = iterCellSpaces(obj);
   const levels = new Set();
+  const byLevel3d = new Map();
   const byLevel2d = new Map();
+  const bbox = [minx,miny,maxx,maxy];
   const addLevel = (lvl) => {
     levels.add(lvl);
+    if (!byLevel3d.has(lvl)) byLevel3d.set(lvl, { x: [], y: [], z: [], i: [], j: [], k: [] });
     if (!byLevel2d.has(lvl)) byLevel2d.set(lvl, { pairs: [], ids: [] }); // Fixed: Ensure ids exist
   };
-  const bbox = [minx,miny,maxx,maxy];
+
   for (const cs of cells) {
     const lvl = safeStr(cs.level) || safeStr(cs.storey) || "UNKNOWN";
     addLevel(lvl);
 
     const geom = cs.cellSpaceGeom || {};
+    const g3 = geom.geometry3D || null;
     const g2 = geom.geometry2D || null;
+
+    if (g3 && g3.type === "Polyhedron") {
+      const tris = polyhedronToTris(g3);
+      const store = byLevel3d.get(lvl);
+      for (const tri of tris) {
+        const base = store.x.length;
+        for (const p of tri) {
+          store.x.push(p[0]); store.y.push(p[1]); store.z.push(p[2] ?? 0);
+        }
+        store.i.push(base); store.j.push(base + 1); store.k.push(base + 2);
+      }
+    }
 
     const store2 = byLevel2d.get(lvl);
     if (g2 && (g2.type === "Polygon" || g2.type === "MultiPolygon")) {
@@ -311,14 +331,90 @@ function buildBboxModel(obj, minx,miny,maxx,maxy){
         });
         store2.ids.push(null); // Push null to match the gap in pairs
       }
-    } 
+    } else if (g3 && g3.type === "Polyhedron") {
+      const tris = polyhedronToTris(g3);
+      const pts = tris.flat();
+      const bb = bboxFromPoints(pts);
+      if (bb) {
+        const [x0, y0] = bb.min; const [x1, y1] = bb.max;
+        const ring = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
+        pushRingPairs(store2.pairs, ring);
+        ring.forEach(() => store2.ids.push(cs.id));
+        store2.ids.push(null);
+      }
+    }
   }
 
   return {
     _src: obj,
     levels: Array.from(levels).sort(),
     byLevel2d,
+    byLevel3d,
     bbox: bbox
+  };
+}
+
+function buildPOIModel(obj){
+  const cells = iterCellSpaces(obj);
+  const levels = new Set();
+  const byLevel3d = new Map();
+  const byLevel2d = new Map();
+  const addLevel = (lvl) => {
+    levels.add(lvl);
+    if (!byLevel3d.has(lvl)) byLevel3d.set(lvl, { x: [], y: [], z: [], i: [], j: [], k: [] });
+    if (!byLevel2d.has(lvl)) byLevel2d.set(lvl, { pairs: [], ids: [] }); // Fixed: Ensure ids exist
+  };
+
+  for (const cs of cells) {
+    const lvl = safeStr(cs.level) || safeStr(cs.storey) || "UNKNOWN";
+    addLevel(lvl);
+
+    const geom = cs.cellSpaceGeom || {};
+    const g3 = geom.geometry3D || null;
+    const g2 = geom.geometry2D || null;
+
+    if (g3 && g3.type === "Polyhedron") {
+      const tris = polyhedronToTris(g3);
+      const store = byLevel3d.get(lvl);
+      for (const tri of tris) {
+        const base = store.x.length;
+        for (const p of tri) {
+          store.x.push(p[0]); store.y.push(p[1]); store.z.push(p[2] ?? 0);
+        }
+        store.i.push(base); store.j.push(base + 1); store.k.push(base + 2);
+      }
+    }
+
+    const store2 = byLevel2d.get(lvl);
+    if (g2 && (g2.type === "Polygon" || g2.type === "MultiPolygon")) {
+      const rings = polygon2dToRings(g2);
+      // Ensure every vertex in the ring gets the ID assigned to it
+      for (const ring of rings) {
+        pushRingPairs(store2.pairs, ring); 
+        ring.forEach(() => {
+          store2.ids.push(cs.id); // Push ID for every coordinate
+        });
+        store2.ids.push(null); // Push null to match the gap in pairs
+      }
+    } else if (g3 && g3.type === "Polyhedron") {
+      const tris = polyhedronToTris(g3);
+      const pts = tris.flat();
+      const bb = bboxFromPoints(pts);
+      if (bb) {
+        const [x0, y0] = bb.min; const [x1, y1] = bb.max;
+        const ring = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
+        pushRingPairs(store2.pairs, ring);
+        ring.forEach(() => store2.ids.push(cs.id));
+        store2.ids.push(null);
+      }
+    }
+  }
+
+  return {
+    _src: obj,
+    levels: Array.from(levels).sort(),
+    byLevel2d,
+    byLevel3d,
   };
 }
 
@@ -394,6 +490,24 @@ function render3D() {
 
     if (nx.length) traces.push({ type: "scatter3d", mode: "markers", name: "Nodes", x: nx, y: ny, z: nz, marker: { size: 4, color: "#f1c40f" } });
     if (ex.length) traces.push({ type: "scatter3d", mode: "lines", name: "Edges", x: ex, y: ey, z: ez, line: { color: "#e74c3c", width: 3 } });
+  }
+  if(SHOW_BBOX && BBOX){
+    for (const [lvl, s] of BBOX.byLevel3d.entries()) {
+    if (!s || !s.i.length) continue;
+    traces.push({
+      type: "mesh3d", name: lvl, x: s.x, y: s.y, z: s.z, i: s.i, j: s.j, k: s.k,
+      opacity: 0.5, color:"rgba(240, 107, 245, 0.95)", hoverinfo: "skip", visible: (CURRENT_LEVEL === "__all__" || CURRENT_LEVEL === lvl)
+    });
+  }
+  }
+  if(SHOW_POI && POI){
+    for (const [lvl, s] of POI.byLevel3d.entries()) {
+    if (!s || !s.i.length) continue;
+    traces.push({
+      type: "mesh3d", name: lvl, x: s.x, y: s.y, z: s.z, i: s.i, j: s.j, k: s.k,
+      opacity: 0.5, color:"rgba(240, 107, 245, 0.95)", hoverinfo: "skip", visible: (CURRENT_LEVEL === "__all__" || CURRENT_LEVEL === lvl)
+    });
+  }
   }
   if(ROUTE&&ROUTE.points&&ROUTE.points.length>=2){
     const xs=ROUTE.points.map(p=>p[0]), ys=ROUTE.points.map(p=>p[1]), zs=ROUTE.points.map(p=>p[2]);
@@ -536,14 +650,14 @@ function render2D() {
     }
   }
 
-  if(BBOX){
+  if(SHOW_BBOX && BBOX){
     for (const lvl of BBOX.levels){
      const s = BBOX.byLevel2d.get(lvl);
      if (!s || !s.pairs.length) continue;
      traces.push({
       type: "scattergl", mode: "lines", name: (lvl==="__all__")?"RESULT":`RESULT:${lvl}`, x: s.pairs.map(p => p[0]), y: s.pairs.map(p => p[1]),
       customdata: s.ids, line: { width: 3, color: "rgba(240, 107, 245, 0.95)", simplify: false },
-      hoverinfo: "skip", visible: (CURRENT_LEVEL === lvl)
+      hoverinfo: "skip", visible: SHOW_BBOX&&(CURRENT_LEVEL === lvl)
      });
     const bboxList = BBOX.bbox;
     console.log(bboxList);
@@ -551,7 +665,7 @@ function render2D() {
       type: "scattergl", mode: "lines", name: "bbox", x: [bboxList[0],bboxList[2],bboxList[2],bboxList[0],bboxList[0]], 
       y: [bboxList[1],bboxList[1],bboxList[3],bboxList[3],bboxList[1]],
       line: { width: 2, color: "rgba(251, 1, 1, 0.95)", simplify: false },
-      hoverinfo: "skip", visible: (CURRENT_LEVEL === lvl)
+      hoverinfo: "skip", visible: SHOW_BBOX&&(CURRENT_LEVEL === lvl)
     })
     }  
   }
@@ -739,7 +853,7 @@ function renderCollections(collections) {
     const itemsLink = col.links.find(l => l.rel === "items" && l.type === "application/geo+json");
     const btn = document.createElement("button");
     btn.className = "db-item-btn";
-    btn.innerHTML = `<strong>🏢 ${col.title}</strong><small>ID: ${col.id}</small>`;
+    btn.innerHTML = `<strong>🏢 ${col.title}</strong><small> ID: ${col.id}</small>`;
     
     btn.onclick = async () => {
       // UI feedback
@@ -863,17 +977,45 @@ serviceBtn.addEventListener("click", async () => {
   searchDiv.classList.remove('hidden');
   routeDiv.classList.remove('hidden');
   viewDiv.classList.remove('hidden');
+  if (!selectedFeatureData) return;
   try {
     const selectedLayers = await api.getThematicLayers(selectedCollectionId, selectedFeatureId);
     apiLog.textContent = JSON.stringify(selectedLayers, null ,2);
     selectedLayerId = JSON.parse(JSON.stringify(selectedLayers)).layers[0].id;
     
+    selectedFeatureDataAll = await api.getSingleFeature(selectedCollectionId, selectedFeatureId, true);
+    vizStatus.textContent = "Generating 3D Model...";
+    
+    // 1. Clear existing model if necessary (depends on your geometry.js)
+    // 2. Build the model from the stored data
+    MODEL = buildBaseModel(selectedFeatureDataAll.IndoorFeatures); 
+    const { levelZ, levelSpacing } = computeLevelZ(selectedFeatureDataAll.IndoorFeatures);
+    const { dualNodesByLevel, nodeLevel } = bucketDualNodesByLevel(selectedFeatureDataAll.IndoorFeatures, levelZ);
+    const { dualEdgesByLevel, interLevelEdges } = bucketDualEdgesByLevel(selectedFeatureDataAll.IndoorFeatures, levelZ);
+    MODEL.levelZ = levelZ;
+    MODEL.levelSpacing = levelSpacing;
+    MODEL.dualNodesByLevel = dualNodesByLevel;
+    MODEL.dualEdgesByLevel = dualEdgesByLevel;
+    MODEL.interLevelEdges = interLevelEdges;
+    Plotly.react(plot3d, [], {});
+    Plotly.react(plot2d, [], {});
+    CURRENT_LEVEL = "__all__";
+    // 3. Trigger the 3D Render
+    renderAll();
+    
+    vizStatus.textContent = `Visualizing: ${selectedFeatureId}`;
+
+
   } catch (err) {
     apiLog.textContent = "Error: " + err.message;
   }
 })
 toggleRoute.addEventListener("change", (e)=>{
   SHOW_ROUTE=e.target.checked;
+  if(MODEL) renderAll();
+})
+toggleBbox.addEventListener("change", (e)=>{
+  SHOW_BBOX=e.target.checked;
   if(MODEL) renderAll();
 })
 
@@ -1047,11 +1189,12 @@ destInput.addEventListener("click", () => assignPendingTo("dest"));
 poiBtn.addEventListener("click", async () => {
   try {
     const poiList = await api.searchByPoi(selectedCollectionId, selectedFeatureId, selectedLayerId)
-    // MODEL = buildBaseModel(poiList);
-    // renderAll();
-    openDrawer("List of Poi cell spaces", "Click a cell space");
+    POI = buildPOIModel(poiList);
+    openDrawer("List of PoIs", "Click a cell space");
     renderPoiToDrawer(poiList);
+    SHOW_POI = true;
     apiLog.textContent = JSON.stringify(poiList, null, 2);
+    renderAll();
   } catch (err){
     apiLog.textContent = "Error: " + err.message;
   }
@@ -1071,6 +1214,7 @@ routeBtn.addEventListener("click", async () => {
     const routeResult = await api.routingQuery(selectedCollectionId, selectedFeatureId, selectedLayerId, selectedStartNode, selectedDestNode);
     ROUTE = buildRoute(routeResult, false);
     apiLog.textContent = JSON.stringify(routeResult, null, 2);
+    renderAll();
   } catch (err) {
     apiLog.textContent = "Error: " + err.message;
   }
@@ -1107,10 +1251,8 @@ function clearAll(){
   document.getElementById("geoquery-op-input").value = null;
   document.getElementById("geoquery-geometry-input").value = null;
   document.getElementById("geoquery-level-input").value = null;
-  document.getElementById("bbox-minx").value = null;
-  document.getElementById("bbox-miny").value = null;
-  document.getElementById("bbox-maxx").value = null;
-  document.getElementById("bbox-maxy").value = null;
+  document.getElementById("bbox-min").value = null;
+  document.getElementById("bbox-max").value = null;
   document.getElementById("bbox-level-input").value = null;
 }
 clearBtn.addEventListener("click", clearAll)
@@ -1130,21 +1272,21 @@ connectedBtn.addEventListener("click", async () => {
 
 bboxBtn.addEventListener("click", async () => {
 
-    const minx = document.getElementById("bbox-minx").value;
-    const miny = document.getElementById("bbox-miny").value;
-    const maxx = document.getElementById("bbox-maxx").value;
-    const maxy = document.getElementById("bbox-maxy").value;
+    const min_bbox = document.getElementById("bbox-min").value;
+    const max_bbox = document.getElementById("bbox-max").value;
     const level = document.getElementById("bbox-level-input").value;
 
-    
-    if (!minx || !level) {
+    const [min_x, min_y] = min_bbox.split(",").map(v=>Number(v.trim()));
+    const [max_x, max_y] = max_bbox.split(",").map(v=>Number(v.trim()));
+    if (!min_bbox || !level) {
       alert("bbox and level are required.");
       return;
     }
     try {
-      const bboxResult = await api.getFilteredLayer(selectedCollectionId, selectedFeatureId, selectedLayerId, minx,miny,maxx,maxy, level);
-      BBOX = buildBboxModel(bboxResult,minx,miny,maxx,maxy);
+      const bboxResult = await api.getFilteredLayer(selectedCollectionId, selectedFeatureId, selectedLayerId, min_x,min_y,max_x,max_y, level);
+      BBOX = buildBboxModel(bboxResult,min_x,min_y,max_x,max_y);
       apiLog.textContent = JSON.stringify(bboxResult);
+      renderAll();
     } catch (err) {
       apiLog.textContent = "Error: " + err.message;
     }
@@ -1165,6 +1307,7 @@ geoQueryBtn.addEventListener("click", async () => {
       geoqueryResult = await api.geometricQuery(selectedCollectionId, selectedFeatureId, selectedLayerId, operation, geometry, level);
       apiLog.textContent = JSON.stringify(geoqueryResult, null, 2);
       GEOQUERY = buildOverlayModel(geoqueryResult);
+      renderAll();
     } catch (err) {
       apiLog.textContent = "Error: " + err.message;
     }
@@ -1172,7 +1315,7 @@ geoQueryBtn.addEventListener("click", async () => {
 });
 
 vizAllBtn.addEventListener("click", async () => {
-  if (!selectedFeatureData) return;
+  
 
   try {
     selectedFeatureDataAll = await api.getSingleFeature(selectedCollectionId, selectedFeatureId, true);
