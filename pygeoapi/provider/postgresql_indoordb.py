@@ -1167,33 +1167,6 @@ class PostgresIndoorDB:
             
             # If there is no 2D geometry but 3D, project 3D to 2D geometry
             LOGGER.debug("Project geometry 3D to 2D ")
-            sql_projection = """
-                UPDATE cell_space_n_boundary c
-                SET "2D_geometry" = sub.footprint
-                FROM (
-                    SELECT 
-                        id, 
-                        ST_AsText(
-                            ST_UnaryUnion(
-                                ST_Collect(
-                                    ST_Force2D(
-                                        ST_GeomFromGeoJSON(
-                                            jsonb_build_object(
-                                                'type', 'Polygon',
-                                                'coordinates', jsonb_build_array(face_element) 
-                                            )
-                                        )
-                                    )
-                                )
-                            )
-                        ) AS footprint
-                    FROM cell_space_n_boundary,
-                        jsonb_array_elements("3D_geometry"->'coordinates'->0) AS face_element
-                    WHERE "3D_geometry" IS NOT NULL AND type='space' AND "2D_geometry" IS NULL AND thematiclayer_id = %s
-                    GROUP BY id
-                ) sub
-                WHERE c.id = sub.id AND thematiclayer_id = %s;
-            """
             sql_project_shell = """
 WITH faces AS (
   SELECT
@@ -2020,33 +1993,62 @@ WHERE c.id = u.id
                 # project cellspace's 3D geometry to 2D if it has no 2D geometry.
                 LOGGER.debug("Project geometry 3D to 2D ")
                 sql_projection = """
-                    UPDATE cell_space_n_boundary c
-                    SET "2D_geometry" = sub.footprint
-                    FROM (
-                        SELECT 
-                            id, 
-                            ST_AsText(
-                                ST_UnaryUnion(
-                                    ST_Collect(
-                                        ST_Force2D(
-                                            ST_GeomFromGeoJSON(
-                                                jsonb_build_object(
-                                                    'type', 'Polygon',
-                                                    'coordinates', jsonb_build_array(face_element) 
-                                                )
-                                            )
-                                        )
-                                    )
-                                )
-                            ) AS footprint
-                        FROM cell_space_n_boundary,
-                            jsonb_array_elements("3D_geometry"->'coordinates'->0) AS face_element
-                        WHERE "3D_geometry" IS NOT NULL AND type='space' AND "2D_geometry" IS NULL AND id = %s
-                        GROUP BY id
-                    ) sub
-                    WHERE c.id = sub.id;
-                """
-                cur.execute(sql_projection,(new_internal_id,))
+WITH faces AS (
+  SELECT
+    c.id,
+    s.shell_idx,
+    f.face
+  FROM cell_space_n_boundary c
+  CROSS JOIN LATERAL jsonb_array_elements(c."3D_geometry"->'coordinates')
+    WITH ORDINALITY AS s(shell, shell_idx)
+  CROSS JOIN LATERAL jsonb_array_elements(s.shell) AS f(face)
+  WHERE c."3D_geometry" IS NOT NULL
+    AND c.type = 'space'
+    AND c."2D_geometry" IS NULL
+    AND c.id = %s
+),
+proj AS (
+  SELECT
+    id,
+    shell_idx,
+    ST_SetSRID(
+    ST_Force2D(
+      ST_GeomFromGeoJSON(
+        jsonb_build_object(
+          'type', 'Polygon',
+          'coordinates',
+          CASE
+            -- if face is already [ring,...], keep it; else wrap to [ring]
+            WHEN jsonb_typeof(face->0->0) = 'array' THEN face
+            ELSE jsonb_build_array(face)
+          END
+        )::text
+      )
+    ),
+    0 
+    ) AS g2d
+  FROM faces
+),
+u AS (
+  SELECT
+    id,
+    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx = 1) ) AS ext2d,
+    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx > 1) ) AS int2d
+  FROM proj
+  GROUP BY id
+)
+UPDATE cell_space_n_boundary c
+SET "2D_geometry" =
+  CASE
+    WHEN u.int2d IS NULL THEN u.ext2d
+    ELSE ST_Difference(u.ext2d, u.int2d)
+  END
+FROM u
+WHERE c.id = u.id
+  AND c.id = %s;
+
+"""
+                cur.execute(sql_projection,(new_internal_id, new_internal_id))
                 # 4. FIX: Commit only if we get here successfully
                 self.connection.commit()
                 return new_str_id

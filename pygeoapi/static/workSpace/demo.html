@@ -45,45 +45,46 @@
           <hr style="margin:15px 0;border:0;border-top:1px solid #eee;">
         </div>
         <div class="selectedFeature viewFeature hidden">
-          <button id="indoorFeature-service-button" class="search-btn">View Service</button>
+          <button id="indoorFeature-service-button" class="search-btn">View Services</button>
         </div>
       
     </div>
 
     <!-- Search controls -->
     <div class="block search hidden">
+      <button id="back-btn" class="back-button">Back</button>
       <div class="label">Search</div>
       <div id="cell-status" class="tiny" style="margin-top:8px; color:#666;"></div>
       <details class="dropdown">
-        <summary class="dropdown-summary">Point of interest</summary>
+        <summary class="dropdown-summary">[CellSpaces]Point of Interest</summary>
         <div class="dropdown-content">
-            <button class="search-btn" id="btn-poi">Point of interest</button>
+            <button class="search-btn" id="btn-poi">PoI</button>
         </div>
       </details>
       <details class="dropdown">
-        <summary class="dropdown-summary">Search by name</summary>
+        <summary class="dropdown-summary">[CellSpaces]Search by Name</summary>
         <div class="dropdown-content">
             <input id="poi-name-input"
               type="text"
-              placeholder="Search CellSpace by name (e.g., 6208)"
+              placeholder="Search CellSpace by name"
               style="width:100%;"/>
               <div class="tiny" id="poi-name-status" style="margin-top:6px; color:#666;"></div>
         </div>
       </details>
       <details class="dropdown">
-        <summary class="dropdown-summary">Connected Nodes</summary>
+        <summary class="dropdown-summary">[Nodes]Connected Nodes</summary>
         <div class="dropdown-content">
-            <button class="search-btn" id="btn-connected" style="margin-top:10px;">Connected nodes</button>
+            <button class="search-btn" id="btn-connected">Connected nodes</button>
         </div>
-      </details>  
+      </details> 
       <details class="dropdown">
-        <summary class="dropdown-summary">Geometric query</summary>
+        <summary class="dropdown-summary">[ThematicLayer]Geometric query</summary>
         <div class="dropdown-content">
-          <input id="geoquery-op-input"
-              type="text"
-              placeholder="contains, intersects, within"
-              class="geo-input"
-          />
+          <select id="geoquery-op-input">
+            <option value="contains">contains</option>
+            <option value="contains">intersects</option>
+            <option value="contains">within</option>
+          </select>
           <input id="geoquery-geometry-input"
               type="text"
               placeholder="WKT format"
@@ -98,7 +99,27 @@
           Run Query
           </button>
         </div>
-      </details>  
+      </details> 
+      <details class="dropdown">
+        <summary class="dropdown-summary">[ThematicLayer]Filter by bbox</summary>
+        <div class="dropdown-content">
+          <input id="bbox-min"
+          type="text"
+          placeholder="min_x,min_y"
+          style="width:70%;"/>
+          <input id="bbox-max"
+          type="text"
+          placeholder="max_x,max_y"
+          style="width:70%;"/>
+          <input id="bbox-level-input"
+          type="text"
+          placeholder="LEVEL"
+          class="geo-input"/>
+          <button id="bbox-run-btn" class="search-btn">
+          Run
+          </button>   
+        </div>
+      </details>
     </div>
       
 
@@ -117,16 +138,16 @@
 
         <div class="route-inputs">
           <!-- clicking opens the same drawer in "cell search" mode -->
-          <input type="text" id="route-start-input" placeholder="Choose starting point" readonly style="cursor:pointer;">
+          <input type="text" id="route-start-input" placeholder="start" readonly style="cursor:pointer;">
           <div style="height:8px;"></div>
-          <input type="text" id="route-dest-input" placeholder="Choose destination" readonly style="cursor:pointer;">
+          <input type="text" id="route-dest-input" placeholder="destination" readonly style="cursor:pointer;">
         </div>
 
         <button id="btn-swap-route" class="btn-icon" title="Reverse starting point and destination">⇅</button>
       </div>
 
       <div class="route-actions">
-        <button id="btn-get-route" class="btn-primary" disabled>Navigate</button>
+        <button id="btn-get-route" class="btn-primary" disabled>Route</button>
         <button id="btn-clear-route" class="btn-text">Clear</button>
       </div>
 
@@ -149,17 +170,20 @@
         <option value="__all__">All</option>
       </select>
       <div class="checkrow" style="margin-top:8px;">
-        <input id="toggleDual" type="checkbox"/>
+        <input id="toggleDual" type="checkbox" checked/>
         <label for="toggleDual">Show dual graph (nodes & edges)</label>
       </div>
       <div class="checkrow" style="margin-top:8px;">
       <input id="toggleRoute" type="checkbox" checked/><label for="toggleRoute">Show route</label>
       </div>
       <div class="checkrow" style="margin-top:8px;">
+      <input id="toggleBbox" type="checkbox" checked/><label for="toggleBbox">Show bbox(2D)</label>
+      </div>
+      <div class="checkrow" style="margin-top:8px;">
       <input id="toggleGeoquery" type="checkbox" checked/><label for="toggleGeoquery">Show geometric query</label>
       </div>
     </div>
-    <button id="visualize" style="margin-top: 8px; width: 100%;">Visualize</button>
+    <button id="visualize" style="margin-top: 8px; width: 100%;" class="hidden">Visualize</button>
     <button id="view-all"  style="margin-top: 8px; width: 100%;" class="hidden">Visualize All</button>
     <div id="viz-status" class="tiny" style="margin-top:4px;"></div>
     </div>

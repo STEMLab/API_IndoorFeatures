@@ -1,10 +1,10 @@
 {
   "featureType": "IndoorFeatures",
-  "id": "AIST_Waterfront_Center",
+  "id": "pnu_yangsan",
   "geometry": {
     "type": "Point",
     "coordinates": [
-      128.87170034082445, 35.24556901384791
+      129.0068261669693, 35.32522130054501
     ]
   },
   "properties": {
