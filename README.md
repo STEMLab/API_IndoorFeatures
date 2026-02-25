@@ -1,11 +1,11 @@
-# IndoorGML API
+# IndoorFeature API
 
-IndoorGML api is a RESTful api implementation of the **OGC IndoorGML 2.0** standard, designed to align with **OGC API - Features** standards. This api extends the pygeoapi framework to provide specialized service layers for indoor environments.
+IndoorFeature api is a RESTful api implementation of the **OGC IndoorGML 2.0** standard, designed to align with **OGC API - Features** standards. This api extends the pygeoapi framework to provide specialized service layers for indoor environments.
 
 
 ### Naming
 
-This API is referred to as the **IndoorGML API** because it implements
+This API is referred to as the **IndoorFeature API** because it implements
 the IndoorGML conceptual model, including spatial subdivision, topology,
 layering, and duality relationships.
 
@@ -71,12 +71,10 @@ pip install -r requirements-indoor.txt
 pip install -e .
 # Start Docker Containers
 docker-compose up -d --build
-export PYGEOAPI_CONFIG=pygeoapi-config.yml
-export PYGEOAPI_OPENAPI=openAPI/indoorgmlapi_bundled.yml
 
-pygeoapi serve
+./start.sh
 ```
 
-### 2. Environment Startup
+### 3. Testing api
 We recommand to use a swagger UI for testing api.
 
