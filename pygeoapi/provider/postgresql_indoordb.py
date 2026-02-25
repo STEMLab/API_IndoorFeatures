@@ -1,11 +1,9 @@
 import json
-import random
 import datetime
 import psycopg2
 import logging
 from functools import partial
 from dateutil.parser import parse as dateparse
-import pytz
 from pygeoapi.util import format_datetime
 from psycopg2.extras import Json, RealDictCursor, NamedTupleCursor
 import re
@@ -1168,61 +1166,64 @@ class PostgresIndoorDB:
             # If there is no 2D geometry but 3D, project 3D to 2D geometry
             LOGGER.debug("Project geometry 3D to 2D ")
             sql_project_shell = """
-WITH faces AS (
-  SELECT
-    c.id,
-    s.shell_idx,
-    f.face
-  FROM cell_space_n_boundary c
-  CROSS JOIN LATERAL jsonb_array_elements(c."3D_geometry"->'coordinates')
-    WITH ORDINALITY AS s(shell, shell_idx)
-  CROSS JOIN LATERAL jsonb_array_elements(s.shell) AS f(face)
-  WHERE c."3D_geometry" IS NOT NULL
-    AND c.type = 'space'
-    AND c."2D_geometry" IS NULL
-    AND c.thematiclayer_id = %s
-),
-proj AS (
-  SELECT
-    id,
-    shell_idx,
-    ST_SetSRID(
-    ST_Force2D(
-      ST_GeomFromGeoJSON(
-        jsonb_build_object(
-          'type', 'Polygon',
-          'coordinates',
-          CASE
-            -- if face is already [ring,...], keep it; else wrap to [ring]
-            WHEN jsonb_typeof(face->0->0) = 'array' THEN face
-            ELSE jsonb_build_array(face)
-          END
-        )::text
-      )
-    ),
-    0 
-    ) AS g2d
-  FROM faces
-),
-u AS (
-  SELECT
-    id,
-    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx = 1) ) AS ext2d,
-    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx > 1) ) AS int2d
-  FROM proj
-  GROUP BY id
-)
-UPDATE cell_space_n_boundary c
-SET "2D_geometry" =
-  CASE
-    WHEN u.int2d IS NULL THEN u.ext2d
-    ELSE ST_Difference(u.ext2d, u.int2d)
-  END
-FROM u
-WHERE c.id = u.id
-  AND c.thematiclayer_id = %s;
-
-"""
+            WITH faces AS (
+            SELECT
+                c.id,
+                s.shell_idx,
+                f.face
+            FROM cell_space_n_boundary c
+            CROSS JOIN LATERAL jsonb_array_elements(c."3D_geometry"->'coordinates')
+                WITH ORDINALITY AS s(shell, shell_idx)
+            CROSS JOIN LATERAL jsonb_array_elements(s.shell) AS f(face)
+            WHERE c."3D_geometry" IS NOT NULL
+                AND c.type = 'space'
+                AND c."2D_geometry" IS NULL
+                AND c.thematiclayer_id = %s
+                AND (
+                s.shell_idx = 1
+                OR jsonb_array_length(c."3D_geometry"->'coordinates') > 1
+                )
+            ),
+            proj AS (
+            SELECT
+                id,
+                shell_idx,
+                ST_SetSRID(
+                ST_Force2D(
+                ST_GeomFromGeoJSON(
+                    jsonb_build_object(
+                    'type', 'Polygon',
+                    'coordinates',
+                    CASE
+                        -- if face is already [ring,...], keep it; else wrap to [ring]
+                        WHEN jsonb_typeof(face->0->0) = 'array' THEN face
+                        ELSE jsonb_build_array(face)
+                    END
+                    )::text
+                )
+                ),
+                0 
+                ) AS g2d
+            FROM faces
+            ),
+            u AS (
+            SELECT
+                id,
+                ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx = 1) ) AS ext2d,
+                ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx > 1) ) AS int2d
+            FROM proj
+            GROUP BY id
+            )
+            UPDATE cell_space_n_boundary c
+            SET "2D_geometry" =
+            CASE
+                WHEN u.int2d IS NULL THEN u.ext2d
+                ELSE ST_Difference(u.ext2d, u.int2d)
+            END
+            FROM u
+            WHERE c.id = u.id
+            AND c.thematiclayer_id = %s;
+            """
             cur.execute(sql_project_shell,(layer_pk,layer_pk))
 
         return dual_cell, dual_boundary
@@ -1992,63 +1993,66 @@ WHERE c.id = u.id
 
                 # project cellspace's 3D geometry to 2D if it has no 2D geometry.
                 LOGGER.debug("Project geometry 3D to 2D ")
-                sql_projection = """
-WITH faces AS (
-  SELECT
-    c.id,
-    s.shell_idx,
-    f.face
-  FROM cell_space_n_boundary c
-  CROSS JOIN LATERAL jsonb_array_elements(c."3D_geometry"->'coordinates')
-    WITH ORDINALITY AS s(shell, shell_idx)
-  CROSS JOIN LATERAL jsonb_array_elements(s.shell) AS f(face)
-  WHERE c."3D_geometry" IS NOT NULL
-    AND c.type = 'space'
-    AND c."2D_geometry" IS NULL
-    AND c.id = %s
-),
-proj AS (
-  SELECT
-    id,
-    shell_idx,
-    ST_SetSRID(
-    ST_Force2D(
-      ST_GeomFromGeoJSON(
-        jsonb_build_object(
-          'type', 'Polygon',
-          'coordinates',
-          CASE
-            -- if face is already [ring,...], keep it; else wrap to [ring]
-            WHEN jsonb_typeof(face->0->0) = 'array' THEN face
-            ELSE jsonb_build_array(face)
-          END
-        )::text
-      )
-    ),
-    0 
-    ) AS g2d
-  FROM faces
-),
-u AS (
-  SELECT
-    id,
-    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx = 1) ) AS ext2d,
-    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx > 1) ) AS int2d
-  FROM proj
-  GROUP BY id
-)
-UPDATE cell_space_n_boundary c
-SET "2D_geometry" =
-  CASE
-    WHEN u.int2d IS NULL THEN u.ext2d
-    ELSE ST_Difference(u.ext2d, u.int2d)
-  END
-FROM u
-WHERE c.id = u.id
-  AND c.id = %s;
-
-"""
-                cur.execute(sql_projection,(new_internal_id, new_internal_id))
+                sql_project_shell = """
+                WITH faces AS (
+                SELECT
+                    c.id,
+                    s.shell_idx,
+                    f.face
+                FROM cell_space_n_boundary c
+                CROSS JOIN LATERAL jsonb_array_elements(c."3D_geometry"->'coordinates')
+                    WITH ORDINALITY AS s(shell, shell_idx)
+                CROSS JOIN LATERAL jsonb_array_elements(s.shell) AS f(face)
+                WHERE c."3D_geometry" IS NOT NULL
+                    AND c.type = 'space'
+                    AND c."2D_geometry" IS NULL
+                    AND c.thematiclayer_id = %s
+                    AND (
+                    s.shell_idx = 1
+                    OR jsonb_array_length(c."3D_geometry"->'coordinates') > 1
+                    )
+                ),
+                proj AS (
+                SELECT
+                    id,
+                    shell_idx,
+                    ST_SetSRID(
+                    ST_Force2D(
+                    ST_GeomFromGeoJSON(
+                        jsonb_build_object(
+                        'type', 'Polygon',
+                        'coordinates',
+                        CASE
+                            -- if face is already [ring,...], keep it; else wrap to [ring]
+                            WHEN jsonb_typeof(face->0->0) = 'array' THEN face
+                            ELSE jsonb_build_array(face)
+                        END
+                        )::text
+                    )
+                    ),
+                    0 
+                    ) AS g2d
+                FROM faces
+                ),
+                u AS (
+                SELECT
+                    id,
+                    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx = 1) ) AS ext2d,
+                    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx > 1) ) AS int2d
+                FROM proj
+                GROUP BY id
+                )
+                UPDATE cell_space_n_boundary c
+                SET "2D_geometry" =
+                CASE
+                    WHEN u.int2d IS NULL THEN u.ext2d
+                    ELSE ST_Difference(u.ext2d, u.int2d)
+                END
+                FROM u
+                WHERE c.id = u.id
+                AND c.thematiclayer_id = %s;
+            """
+                cur.execute(sql_project_shell,(new_internal_id, new_internal_id))
                 # 4. FIX: Commit only if we get here successfully
                 self.connection.commit()
                 return new_str_id
