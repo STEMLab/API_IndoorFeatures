@@ -496,7 +496,7 @@ function render3D() {
     if (!s || !s.i.length) continue;
     traces.push({
       type: "mesh3d", name: lvl, x: s.x, y: s.y, z: s.z, i: s.i, j: s.j, k: s.k,
-      opacity: 0.5, color:"rgba(240, 107, 245, 0.95)", hoverinfo: "skip", visible: (CURRENT_LEVEL === "__all__" || CURRENT_LEVEL === lvl)
+      opacity: 0.5, color:"rgba(240, 107, 245, 0.95)", hoverinfo: "skip", visible: SHOW_BBOX&&(CURRENT_LEVEL === "__all__" || CURRENT_LEVEL === lvl)
     });
   }
   }
@@ -505,7 +505,7 @@ function render3D() {
     if (!s || !s.i.length) continue;
     traces.push({
       type: "mesh3d", name: lvl, x: s.x, y: s.y, z: s.z, i: s.i, j: s.j, k: s.k,
-      opacity: 0.5, color:"rgba(240, 107, 245, 0.95)", hoverinfo: "skip", visible: (CURRENT_LEVEL === "__all__" || CURRENT_LEVEL === lvl)
+      opacity: 0.5, color:"rgba(240, 107, 245, 0.95)", hoverinfo: "skip", visible: SHOW_POI&&(CURRENT_LEVEL === "__all__" || CURRENT_LEVEL === lvl)
     });
   }
   }
@@ -1204,6 +1204,8 @@ function closeDrawer(){
   drawerEl.classList.add("hidden");
   document.getElementById("result-list").innerHTML = "";
   drawerFooterEl.textContent = "";
+  SHOW_POI = false;
+  renderAll();
 }
 drawerCloseBtn?.addEventListener("click", closeDrawer);
 
@@ -1237,14 +1239,11 @@ function clearAll(){
   selectedStartNode = null;
   selectedDestNode = null;
   selectedDualMemberId = null;
-  Plotly.purge(plot3d);
-  Plotly.purge(plot2d);
   CURRENT_LEVEL = "__all__";
   apiLog.textContent = "";
   cellStatus.textContent = "";
   routeStatus.textContent = "";
   vizStatus.textContent = "";
-  MODEL=null;
   ROUTE=null;
   GEOQUERY = null;
   drawerEl.classList.add("hidden");
@@ -1254,6 +1253,7 @@ function clearAll(){
   document.getElementById("bbox-min").value = null;
   document.getElementById("bbox-max").value = null;
   document.getElementById("bbox-level-input").value = null;
+  renderAll();
 }
 clearBtn.addEventListener("click", clearAll)
 
@@ -1347,6 +1347,8 @@ vizAllBtn.addEventListener("click", async () => {
 
 backBtn.addEventListener("click", () => {
   clearAll();
+  Plotly.purge(plot3d);
+  Plotly.purge(plot2d);
   selectedFeatureDataAll = null;
   initialDiv.classList.remove('hidden');
   searchDiv.classList.add('hidden');
