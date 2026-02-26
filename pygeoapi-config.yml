@@ -25,22 +25,24 @@ logging:
 
 metadata:
     identification:
-        title: PNU STEMLab IndoorGML API
+        title: IndoorFeature API Demonstration
         description: Developing IndoorGML and IndoorJSON support for OGC API Standards.
         keywords:
             - IndoorGML
             - PNU
-            - STEMLab
+            - AIST
+            - OGC
         terms_of_service: https://creativecommons.org/licenses/by/4.0/ # Add this line!
         url: http://localhost:5000
     provider:
-        name: PNU STEMLab
+        name: PNU STEMLab and AIST IPRI
         url: https://github.com/STEMLab
     license:
         name: MIT
         url: https://opensource.org/licenses/MIT
     contact:
-        name: Tonny
+        name: Taehoon KIM
+        email: kim.taehoon@aist.go.jp
         url: https://github.com/STEMLab/IndoorGML_API
 
 resources:
@@ -245,10 +247,3 @@ resources:
         type: process
         processor:
             name: HelloWorld
-
-database:
-  host: localhost
-  port: 5432
-  database: indoordb
-  username: user      
-  password: password   

@@ -1094,8 +1094,8 @@ class PostgresIndoorDB:
                 sql = """
                     INSERT INTO cell_space_n_boundary 
                     (id_str, type, collection_id, indoorfeature_id, thematiclayer_id, 
-                    cell_name, level, "2D_geometry","3D_geometry", poi)
-                    VALUES (%s, 'space', %s, %s, %s, %s, %s, ST_GeomFromText(%s, 0), %s, %s)
+                    cell_name, level, "2D_geometry","3D_geometry", poi, external_reference)
+                    VALUES (%s, 'space', %s, %s, %s, %s, %s, ST_GeomFromText(%s, 0), %s, %s, %s)
                     RETURNING id
                 """
                 cur.execute(sql, (
@@ -1107,7 +1107,8 @@ class PostgresIndoorDB:
                     str(cell.get('level')),
                     self.json_to_wkt(geom_2d),
                     json.dumps(geom_3d),
-                    cell.get('poi')
+                    cell.get('poi'),
+                    json.dumps(cell.get('externalReference')) if cell.get('externalReference') else None
                 ))
                 # Store cell pk for duality
                 cell_pk = cur.fetchone()
@@ -1124,7 +1125,7 @@ class PostgresIndoorDB:
                 geom_raw = bound.get('cellBoundaryGeom', {})
                 geom_2d = geom_raw.get('geometry2D', None) 
                 geom_3d = geom_raw.get('geometry3D', None)
-
+                external_ref = json.dumps(bound.get('externalReference')) if bound.get('externalReference') else None
                 duplicate_sql = """
                         SELECT n.id_str
                         FROM node_n_edge n
@@ -1142,8 +1143,8 @@ class PostgresIndoorDB:
                 sql = """
                     INSERT INTO cell_space_n_boundary 
                     (id_str, type, collection_id, indoorfeature_id, thematiclayer_id, 
-                    is_virtual, "2D_geometry", "3D_geometry", bounded_by_cell_id)
-                    VALUES (%s, 'boundary', %s, %s, %s, %s, ST_GeomFromText(%s, 0), %s, %s)
+                    is_virtual, "2D_geometry", "3D_geometry", bounded_by_cell_id, external_reference)
+                    VALUES (%s, 'boundary', %s, %s, %s, %s, ST_GeomFromText(%s, 0), %s, %s, %s)
                     RETURNING id
                 """
                 cur.execute(sql, (
@@ -1154,7 +1155,8 @@ class PostgresIndoorDB:
                     bound.get('isVirtual', False),
                     self.json_to_wkt(geom_2d),
                     json.dumps(geom_3d),
-                    boundingCell
+                    boundingCell,
+                    external_ref
                 ))
 
                 # Store boundary pk for duality
@@ -1224,7 +1226,82 @@ class PostgresIndoorDB:
             WHERE c.id = u.id
             AND c.thematiclayer_id = %s;
             """
-            cur.execute(sql_project_shell,(layer_pk,layer_pk))
+            sql_project_shell = """
+            WITH targets AS (
+            SELECT id, "3D_geometry"
+            FROM cell_space_n_boundary
+            WHERE thematiclayer_id = %s
+                AND type='space'
+                AND "2D_geometry" IS NULL
+                AND "3D_geometry" IS NOT NULL
+            ),
+            faces AS (
+            SELECT
+                t.id,
+                s.shell_idx,
+                f.face
+            FROM targets t
+            CROSS JOIN LATERAL jsonb_array_elements(t."3D_geometry"->'coordinates')
+                WITH ORDINALITY AS s(shell, shell_idx)
+            CROSS JOIN LATERAL jsonb_array_elements(s.shell) AS f(face)
+            ),
+            face_z AS (
+            SELECT
+                id, shell_idx, face,
+                (SELECT min((pt->>2)::float) FROM jsonb_array_elements(face) pt) AS zmin,
+                (SELECT max((pt->>2)::float) FROM jsonb_array_elements(face) pt) AS zmax
+            FROM faces
+            ),
+            floor_faces AS (
+            -- horizontal faces only + choose the global minimum z (floor) per id
+            SELECT f.*
+            FROM face_z f
+            JOIN (
+                SELECT id, min(zmin) AS floor_z
+                FROM face_z
+                WHERE zmin = zmax
+                GROUP BY id
+            ) m USING (id)
+            WHERE f.zmin = f.zmax
+                AND f.zmin = m.floor_z
+            ),
+            proj AS (
+            SELECT
+                id,
+                shell_idx,
+                ST_Force2D(
+                ST_GeomFromGeoJSON(
+                    jsonb_build_object(
+                    'type','Polygon',
+                    'coordinates',
+                    CASE
+                        WHEN jsonb_typeof(face->0->0) = 'array' THEN face
+                        ELSE jsonb_build_array(face)
+                    END
+                    )::text
+                )
+                ) AS g2d
+            FROM floor_faces
+            ),
+            u AS (
+            SELECT
+                id,
+                ST_UnaryUnion(ST_Collect(g2d) FILTER (WHERE shell_idx = 1)) AS ext2d,
+                ST_UnaryUnion(ST_Collect(g2d) FILTER (WHERE shell_idx > 1)) AS int2d
+            FROM proj
+            GROUP BY id
+            )
+            UPDATE cell_space_n_boundary c
+            SET "2D_geometry" = ST_SetSRID(
+            CASE
+                WHEN u.int2d IS NULL THEN u.ext2d
+                ELSE ST_Difference(u.ext2d, u.int2d)
+            END
+            , 0)
+            FROM u
+            WHERE c.id = u.id;
+            """
+            cur.execute(sql_project_shell,(layer_pk,))
 
         return dual_cell, dual_boundary
             
@@ -1915,15 +1992,15 @@ class PostgresIndoorDB:
                                     update_bounded_by.append(row.id)
 
                     geom_root = data.get('cellSpaceGeom', {})
-                    geom_2d_wkt = self.json_to_wkt(geom_root['geometry2D'])
-                    geom_3d_json = json.dumps(geom_root['geometry3D'])
+                    geom_2d_wkt = self.json_to_wkt(geom_root['geometry2D']) if geom_root.get('geometry2D') else None
+                    geom_3d_json = json.dumps(geom_root['geometry3D']) if geom_root.get('geometry3D') else None
                 
                 elif f_type == 'CellBoundary':
                     db_type = 'boundary'
                     is_virtual = data.get('isVirtual', False)
                     geom_root = data.get('cellBoundaryGeom', {})
-                    geom_2d_wkt = self.json_to_wkt(geom_root.get('geometry2D'))
-                    geom_3d_json = json.dumps(geom_root.get('geometry3D'))
+                    geom_2d_wkt = self.json_to_wkt(geom_root.get('geometry2D')) if geom_root.get('geometry2D') else None
+                    geom_3d_json = json.dumps(geom_root.get('geometry3D')) if geom_root.get('geometry3D') else None
 
                     if duality_raw:  # validation check: CellBoundary can have duality to edge which has no duality
                         duality_id = duality_raw.split(':')[-1]
@@ -1983,7 +2060,8 @@ class PostgresIndoorDB:
                         update_bounded_by,
                         layer_row[0]
                     ))
-                if f_type == 'CellBoundary' and duality_edge_pk:
+                    
+                elif f_type == 'CellBoundary' and duality_edge_pk:
                     update_edgeDuality_sql = """
                         UPDATE node_n_edge
                         SET duality_id = %s
@@ -1994,65 +2072,87 @@ class PostgresIndoorDB:
                 # project cellspace's 3D geometry to 2D if it has no 2D geometry.
                 LOGGER.debug("Project geometry 3D to 2D ")
                 sql_project_shell = """
-                WITH faces AS (
+                WITH targets AS (
+                SELECT id, "3D_geometry"
+                FROM cell_space_n_boundary
+                WHERE id = %s
+                    AND type='space'
+                    AND "2D_geometry" IS NULL
+                    AND "3D_geometry" IS NOT NULL
+                ),
+                faces AS (
                 SELECT
-                    c.id,
+                    t.id,
                     s.shell_idx,
                     f.face
-                FROM cell_space_n_boundary c
-                CROSS JOIN LATERAL jsonb_array_elements(c."3D_geometry"->'coordinates')
+                FROM targets t
+                CROSS JOIN LATERAL jsonb_array_elements(t."3D_geometry"->'coordinates')
                     WITH ORDINALITY AS s(shell, shell_idx)
                 CROSS JOIN LATERAL jsonb_array_elements(s.shell) AS f(face)
-                WHERE c."3D_geometry" IS NOT NULL
-                    AND c.type = 'space'
-                    AND c."2D_geometry" IS NULL
-                    AND c.thematiclayer_id = %s
-                    AND (
-                    s.shell_idx = 1
-                    OR jsonb_array_length(c."3D_geometry"->'coordinates') > 1
-                    )
+                ),
+                face_z AS (
+                SELECT
+                    id, shell_idx, face,
+                    (SELECT min((pt->>2)::float) FROM jsonb_array_elements(face) pt) AS zmin,
+                    (SELECT max((pt->>2)::float) FROM jsonb_array_elements(face) pt) AS zmax
+                FROM faces
+                ),
+                floor_faces AS (
+                SELECT f.*
+                FROM face_z f
+                JOIN (
+                    SELECT id, min(zmin) AS floor_z
+                    FROM face_z
+                    WHERE zmin = zmax
+                    GROUP BY id
+                ) m USING (id)
+                WHERE f.zmin = f.zmax
+                    AND f.zmin = m.floor_z
+                ),
+                use_faces AS (
+                SELECT * FROM floor_faces
+                UNION ALL
+                SELECT * FROM face_z
+                WHERE NOT EXISTS (SELECT 1 FROM floor_faces)
                 ),
                 proj AS (
                 SELECT
                     id,
                     shell_idx,
-                    ST_SetSRID(
                     ST_Force2D(
                     ST_GeomFromGeoJSON(
                         jsonb_build_object(
-                        'type', 'Polygon',
+                        'type','Polygon',
                         'coordinates',
                         CASE
-                            -- if face is already [ring,...], keep it; else wrap to [ring]
                             WHEN jsonb_typeof(face->0->0) = 'array' THEN face
                             ELSE jsonb_build_array(face)
                         END
                         )::text
                     )
-                    ),
-                    0 
                     ) AS g2d
-                FROM faces
+                FROM use_faces
                 ),
                 u AS (
                 SELECT
                     id,
-                    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx = 1) ) AS ext2d,
-                    ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx > 1) ) AS int2d
+                    ST_UnaryUnion(ST_Collect(g2d) FILTER (WHERE shell_idx = 1)) AS ext2d,
+                    ST_UnaryUnion(ST_Collect(g2d) FILTER (WHERE shell_idx > 1)) AS int2d
                 FROM proj
                 GROUP BY id
                 )
                 UPDATE cell_space_n_boundary c
-                SET "2D_geometry" =
+                SET "2D_geometry" = ST_SetSRID(
                 CASE
                     WHEN u.int2d IS NULL THEN u.ext2d
                     ELSE ST_Difference(u.ext2d, u.int2d)
                 END
+                , 0)
                 FROM u
                 WHERE c.id = u.id
-                AND c.thematiclayer_id = %s;
-            """
-                cur.execute(sql_project_shell,(new_internal_id, new_internal_id))
+                AND c.id = %s
+                """
+                cur.execute(sql_project_shell,(new_internal_id,new_internal_id))
                 # 4. FIX: Commit only if we get here successfully
                 self.connection.commit()
                 return new_str_id
