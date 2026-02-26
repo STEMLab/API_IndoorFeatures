@@ -2911,10 +2911,10 @@ class PostgresIndoorDB:
 # endregion      
 
 # region Services
-    def geometric_query(self, collection_id:str, feature_id:str, layer_id:str, op:str=None, geometry:str=None, level:str=None):
+    def geometric_query(self, collection_id:str, feature_id:str, layer_id:str, rel:str=None, geometry:str=None, level:str=None):
         with self.connection.cursor(cursor_factory=RealDictCursor) as cur:
-            if not op or not geometry:
-                LOGGER.debug("The 'op' and 'geometry' parameter are required.")
+            if not rel or not geometry:
+                LOGGER.debug("The 'rel' and 'geometry' parameter are required.")
                 return False
             lookup_sql = """
                 SELECT t.*
@@ -2928,7 +2928,7 @@ class PostgresIndoorDB:
             if not row:
                 return {}
             
-            primal = self._get_primal_geometric_query(row['id'], row['primalspace_id_str'], op=op, geometry=geometry, level=level,
+            primal = self._get_primal_geometric_query(row['id'], row['primalspace_id_str'], rel=rel, geometry=geometry, level=level,
                                                       p_create=row['p_creation_datetime'], p_terminate=row['p_termination_datetime'])
             dual = self._get_dual_space(row['id'], row['dualspace_id_str'], d_create=row['d_creation_datetime'], 
                                         d_terminate=row['d_termination_datetime'], is_logical=row['is_logical'], is_directed=row['is_directed'])
@@ -2944,7 +2944,7 @@ class PostgresIndoorDB:
 
             return result_layer
 
-    def _get_primal_geometric_query(self, layer_id:str, pSpace_id:str, op: str, geometry: str, level: str = None, p_create=None, p_terminate=None):
+    def _get_primal_geometric_query(self, layer_id:str, pSpace_id:str, rel: str, geometry: str, level: str = None, p_create=None, p_terminate=None):
         primal_space = {
             "id": pSpace_id, 
             "featureType": "PrimalSpaceLayer",
@@ -2971,14 +2971,14 @@ class PostgresIndoorDB:
                 geometric_query += " AND c.level = %s "
                 params_cells.append(level)
             
-            if op == 'contains':
+            if rel == 'contains':
                 geometric_query += """ AND ST_Contains(c."2D_geometry", ST_GeomFromText(%s, 0)) """
                 LOGGER.debug(geometry)
                 params_cells.append(geometry)
-            elif op == 'within':
+            elif rel == 'within':
                 geometric_query += """ AND ST_Within(c."2D_geometry", ST_GeomFromText(%s, 0)) """
                 params_cells.append(geometry)
-            elif op == 'intersects':
+            elif rel == 'intersects':
                 geometric_query += """ AND ST_Intersects(c."2D_geometry", ST_GeomFromText(%s, 0)) """
                 params_cells.append(geometry)
             else:

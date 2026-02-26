@@ -620,14 +620,14 @@ paths:
         Performs a spatial query against the **PrimalSpace** of a specific ThematicLayer using 2D geometric predicates.
         
         **Functionality:**
-        This operation filters `CellSpace` geometries based on a provided spatial operator (`op`) and a reference geometry. Unlike a standard bounding box filter, this endpoint supports complex topological predicates (e.g., *intersects*, *contains*, *within*) defined by the OGC Simple Features standard.
+        This operation filters `CellSpace` geometries based on a provided spatial relation (`rel`) and a reference geometry. Unlike a standard bounding box filter, this endpoint supports complex topological predicates (e.g., *intersects*, *contains*, *within*) defined by the OGC Simple Features standard.
 
         **Spatial Duality Logic:**
         - **Primal Space:** Only the `CellSpaceMember` items that satisfy the geometric predicate are returned.
         - **Dual Space:** All of the Nodes and Edges in specified ThematicLayer are returned.
 
         **Parameters:**
-        - `op`: The geometric predicate to apply (e.g., `intersects`, `within`, `contains`).
+        - `rel`: The geometric predicate to apply (e.g., `intersects`, `within`, `contains`).
         - `geometry`: The reference geometry in WKT (Well-Known Text) format used for the predicate.
         - `level`: (Optional) Restricts the search to a specific floor or vertical level within the IndoorGML model.
 
@@ -635,7 +635,7 @@ paths:
         Returns a single `ThematicLayer` object containing the filtered Primal and Dual space components.
       operationId: geometricQuery
       parameters:
-        - $ref: './parameters/op.yml'
+        - $ref: './parameters/rel.yml'
         - $ref: './parameters/level.yml'
         - $ref: './parameters/geometry.yml'
       responses:

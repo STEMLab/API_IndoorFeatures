@@ -1,8 +1,8 @@
-name: op
+name: rel
 in: query
 required: true
 description: |-
-  Spatial predicate operation applied between the input geometry
+  Spatial predicate relations applied between the input geometry
   and CellSpace geometries.
 
   Supported operations:

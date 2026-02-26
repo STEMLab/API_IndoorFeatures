@@ -765,14 +765,14 @@ def test_query_get_dual_member(context):
 
 def test_query_geometric_query(context):
     geometry = "POINT(10 10)"
-    op = "intersects"
+    rel = "intersects"
     level = "1F"
     pidb_provider = PostgresIndoorDB()
     pidb_provider.connect()
     result = pidb_provider.geometric_query(context.get('collection_id'),
                                            context.get('ifeature_id'),
                                            context.get('layer_id'),
-                                           op=op,
+                                           rel=rel,
                                            geometry=geometry,
                                            level=level)
     assert result

@@ -640,7 +640,7 @@
           {
             "id": "C3",
             "featureType": "CellSpace",
-            "poi": true,
+            "poi": false,
             "cellSpaceGeom": {
               "geometry3D": {
                 "type": "Polyhedron",
@@ -34964,7 +34964,7 @@
           {
             "id": "C72",
             "featureType": "CellSpace",
-            "poi": false,
+            "poi": true,
             "cellSpaceGeom": {
               "geometry3D": {
                 "type": "Polyhedron",

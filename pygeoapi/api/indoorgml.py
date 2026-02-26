@@ -1443,7 +1443,7 @@ def get_geometric_query(api: API, request: APIRequest, collection_id: str, item_
     :param item_id: Item ID
     :param layer_id: Layer ID
     :param geometry: Input geometry expressed as a 2D Well-Known Text (WKT) string.
-    :param op: Spatial predicate operation applied between the input geometry and CellSpace geometries.
+    :param rel: Spatial predicate relation applied between the input geometry and CellSpace geometries.
     :param level: Filters the indoorFeatures, thematicLayer, and primalSpace content by a specific floor level.
 
     :return: ThematicLayer computed by specific op with geometry
@@ -1453,17 +1453,17 @@ def get_geometric_query(api: API, request: APIRequest, collection_id: str, item_
     
     headers = request.get_response_headers(SYSTEM_LOCALE)
     pidb_provider = PostgresIndoorDB()
-    op_param = request.params.get('op')
+    rel_param = request.params.get('rel')
     geom_param = request.params.get('geometry')
     level = request.params.get('level')
-    if not op_param or not geom_param:
-        msg = 'parameter op and geom should be required'
+    if not rel_param or not geom_param:
+        msg = 'parameter rel and geometry should be required'
         return api.get_exception(
             HTTPStatus.BAD_REQUEST,
             headers, request.format, 'InvalidParameterValue', msg)
     
-    elif op_param.lower() not in ["contains", "within", "intersects"]:
-        msg = 'parameter op should be an one of ["contains", "within", "intersects"]'
+    elif rel_param.lower() not in ["contains", "within", "intersects"]:
+        msg = 'parameter rel should be an one of ["contains", "within", "intersects"]'
         return api.get_exception(
             HTTPStatus.BAD_REQUEST,
             headers, request.format, 'InvalidParameterValue', msg)
@@ -1479,14 +1479,14 @@ def get_geometric_query(api: API, request: APIRequest, collection_id: str, item_
     
     try:
         pidb_provider.connect()
-        result = pidb_provider.geometric_query(collection_id, item_id, layer_id, op=op_param.lower(), geometry=geom, level=level)
+        result = pidb_provider.geometric_query(collection_id, item_id, layer_id, rel=rel_param.lower(), geometry=geom, level=level)
         if not result:
             raise Exception()
         base_url = f"{api.config['server']['url']}/collections/{collection_id}/items/{item_id}/layers/{layer_id}/geoquery"
 
         query_params = {}
-        if op_param:
-            query_params['op'] = op_param
+        if rel_param:
+            query_params['rel'] = rel_param
         if geom:
             query_params['geometry'] = geom
             

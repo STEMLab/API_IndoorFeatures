@@ -1244,10 +1244,11 @@ function clearAll(){
   cellStatus.textContent = "";
   routeStatus.textContent = "";
   vizStatus.textContent = "";
-  ROUTE=null;
+  ROUTE = null;
+  BBOX = null;
   GEOQUERY = null;
   drawerEl.classList.add("hidden");
-  document.getElementById("geoquery-op-input").value = null;
+  document.getElementById("geoquery-rel-input").value = null;
   document.getElementById("geoquery-geometry-input").value = null;
   document.getElementById("geoquery-level-input").value = null;
   document.getElementById("bbox-min").value = null;
@@ -1295,16 +1296,16 @@ bboxBtn.addEventListener("click", async () => {
 
 geoQueryBtn.addEventListener("click", async () => {
 
-    const operation = document.getElementById("geoquery-op-input").value;
+    const relation = document.getElementById("geoquery-rel-input").value;
     const geometry = document.getElementById("geoquery-geometry-input").value;
     const level = document.getElementById("geoquery-level-input").value;
 
-    if (!operation || !geometry) {
-      alert("Please select an operation and enter WKT geometry.");
+    if (!relation || !geometry) {
+      alert("Please select an relation and enter WKT geometry.");
       return;
     }
     try {
-      geoqueryResult = await api.geometricQuery(selectedCollectionId, selectedFeatureId, selectedLayerId, operation, geometry, level);
+      geoqueryResult = await api.geometricQuery(selectedCollectionId, selectedFeatureId, selectedLayerId, relation, geometry, level);
       apiLog.textContent = JSON.stringify(geoqueryResult, null, 2);
       GEOQUERY = buildOverlayModel(geoqueryResult);
       renderAll();
@@ -1315,8 +1316,6 @@ geoQueryBtn.addEventListener("click", async () => {
 });
 
 vizAllBtn.addEventListener("click", async () => {
-  
-
   try {
     selectedFeatureDataAll = await api.getSingleFeature(selectedCollectionId, selectedFeatureId, true);
     vizStatus.textContent = "Generating 3D Model...";
