@@ -25,7 +25,7 @@ logging:
 
 metadata:
     identification:
-        title: IndoorFeature API Demonstration
+        title: IndoorFeatures API Demonstration
         description: Developing IndoorGML and IndoorJSON support for OGC API Standards.
         keywords:
             - IndoorGML
