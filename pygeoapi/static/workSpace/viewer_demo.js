@@ -840,6 +840,7 @@ document.getElementById("api-get-collections").addEventListener("click", async (
     const data = await api.getIndoorCollections();
     
     renderCollections(data.filtered);
+    console.log(data.filtered);
     apiLog.textContent = JSON.stringify(data.raw, null, 2);
   } catch (err) {
     apiLog.textContent = "Error: " + err.message;

@@ -1,0 +1,87 @@
+server:
+    bind:
+        host: 0.0.0.0
+        port: 5000
+    url: http://localhost:5000
+    mimetype: application/json; charset=UTF-8
+    encoding: utf-8
+    language: en-US
+    cors: true
+    map:
+        url: https://tile.openstreetmap.org/{z}/{x}/{y}.png
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+    limits:
+        default_items: 20
+        max_items: 50
+    pretty_print: true
+   # templates:
+    #  path: /home/csm/venv/IndoorGML_API/pygeoapi/templates
+     # static: /home/csm/venv/IndoorGML_API/pygeoapi/static/folder # css/js/img
+
+
+logging:
+    level: DEBUG
+    #logfile: /pygeoapi/log.py  # Or a path on your MacBook like ./pygeoapi.log
+
+metadata:
+    identification:
+        title: IndoorFeatures API Demonstration
+        description: Developing IndoorGML and IndoorJSON support for OGC API Standards.
+        keywords:
+            - IndoorGML
+            - PNU
+            - AIST
+            - OGC
+        terms_of_service: https://creativecommons.org/licenses/by/4.0/ # Add this line!
+        url: http://localhost:5000
+    provider:
+        name: PNU STEMLab and AIST IPRI
+        url: https://github.com/STEMLab
+    license:
+        name: MIT
+        url: https://opensource.org/licenses/MIT
+    contact:
+        name: Taehoon KIM
+        email: kim.taehoon@aist.go.jp
+        url: https://github.com/STEMLab/IndoorGML_API
+
+resources:
+    pusan_national_university:
+        type: collection
+        itemType: indoorfeature
+        title:
+            en: Open IndoorFeauture sample data
+            fr: Ouvrir les données d'exemple IndoorFeature
+        description:
+            en: Sample IndoorFeature data from Pusan National University
+            fr: Données d'échantillon IndoorFeature de l'Université Nationale de Pusan
+        keywords:
+            en:
+                - indoorGML
+                - pnu-201
+            fr:
+                - indoorGML
+                - pnu-201
+        links:
+            - type: text/html
+              rel: canonical
+              title: information
+              href: https://github.com/STEMLab/IndoorGML_API
+              hreflang: en-CA
+        extents:
+            spatial:
+                bbox: [-180,-90,180,90]
+                crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
+        providers:
+            - type: indoorfeature
+              name: CSV
+              data: data/sample/sample_indoor.json
+              id_field: id
+              geometry:
+                  x_field: long
+                  y_field: lat
+
+    hello-world:
+        type: process
+        processor:
+            name: HelloWorld

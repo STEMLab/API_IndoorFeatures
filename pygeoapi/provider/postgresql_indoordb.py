@@ -142,7 +142,7 @@ class PostgresIndoorDB:
             except Exception as e:
                 LOGGER.debug(e)
                 raise e
-    
+
     def post_collection(self, collection):
         """
         Creates a new collection.

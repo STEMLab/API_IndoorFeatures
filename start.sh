@@ -2,7 +2,7 @@
 
 # 1. Define the Environment Variables
 export PYTHONPATH=$(pwd)
-export PYGEOAPI_CONFIG=$(pwd)/pygeoapi-config.yml
+export PYGEOAPI_CONFIG=$(pwd)/pygeoapi-config_indoorFeature.yml
 export PYGEOAPI_OPENAPI=$(pwd)/openAPI/IndoorFeature_openAPI.yaml
 
 # 2. Generate the OpenAPI Document
