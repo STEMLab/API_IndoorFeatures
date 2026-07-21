@@ -232,7 +232,7 @@ def get_tilematrix_sets():
 
 
 @BLUEPRINT.route('/collections', methods=['GET', 'POST'])
-@BLUEPRINT.route('/collections/<path:collection_id>', methods=['GET', 'DELETE'])
+@BLUEPRINT.route('/collections/<path:collection_id>', methods=['GET', 'PATCH','DELETE'])
 def collections(collection_id: str | None = None):
     """
     OGC API collections endpoint
@@ -269,6 +269,8 @@ def collections(collection_id: str | None = None):
             elif request.method == 'DELETE':
                 # Delete from DB
                 return execute_from_flask(indoorgml.manage_collection, request, 'delete', collection_id)
+            elif request.method == 'PATCH':
+                return execute_from_flask(indoorgml.manage_collection, request, 'update', collection_id)
         
         # Fallback: Standard OGC API (YAML-based GeoJSON/CSV features)
         else:
