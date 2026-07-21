@@ -5,7 +5,7 @@
 #          Francesco Bartoli <xbartolone@gmail.com>
 #          Angelos Tzotsos <gcpp.kalxas@gmail.com>
 #
-# Copyright (c) 2025 Tom Kralidis
+# Copyright (c) 2026 Tom Kralidis
 # Copyright (c) 2019 Just van den Broecke
 # Copyright (c) 2025 Francesco Bartoli
 # Copyright (c) 2025 Angelos Tzotsos
@@ -34,7 +34,7 @@
 #
 # =================================================================
 
-FROM ubuntu:noble-20251013
+FROM ubuntu:noble
 
 LABEL maintainer="Just van den Broecke <justb4@gmail.com>"
 
@@ -133,7 +133,7 @@ ADD . /pygeoapi
 RUN python3 -m venv --system-site-packages /venv \
     && /venv/bin/python3 -m pip install --no-cache-dir -r requirements-docker.txt \
     && /venv/bin/python3 -m pip install --no-cache-dir -r requirements-admin.txt \
-    && /venv/bin/python3 -m pip install --no-cache-dir gunicorn \
+    && /venv/bin/python3 -m pip install --no-cache-dir "gunicorn<24" \
     && /venv/bin/python3 -m pip install --no-cache-dir -e .
 
 # Set default config and entrypoint for Docker Image

@@ -70,7 +70,7 @@ class CrsTransformSpec:
 
 def get_srid(crs: Union[str, pyproj.CRS]) -> Union[int, None]:
     """
-    Helper function to attempt to exctract an ESPG SRID from
+    Helper function to attempt to extract an EPSG SRID from
     a `pyproj.CRS` object.
 
     :param crs: `pyproj.CRS` object
@@ -278,7 +278,8 @@ def crs_transform_feature(feature: dict, transform_func: Callable):
         )
 
 
-def transform_bbox(bbox: list, from_crs: str, to_crs: str) -> list:
+def transform_bbox(bbox: list, from_crs: Union[str, pyproj.CRS],
+                   to_crs: Union[str, pyproj.CRS]) -> list:
     """
     helper function to transform a bounding box (bbox) from
     a source to a target CRS. CRSs in URI str format.
@@ -286,7 +287,7 @@ def transform_bbox(bbox: list, from_crs: str, to_crs: str) -> list:
 
     :param bbox: list of coordinates in 'from_crs' projection
     :param from_crs: CRS to transform from
-    :param to_crs: CRSto transform to
+    :param to_crs: CRS to transform to
     :raises `CRSError`: Error raised if no CRS could be identified from an
         URI.
 

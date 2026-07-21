@@ -3,7 +3,7 @@
 # Authors: Tom Kralidis <tomkralidis@gmail.com>
 #          Ricardo Garcia Silva <ricardo.garcia.silva@geobeyond.it>
 #
-# Copyright (c) 2021 Tom Kralidis
+# Copyright (c) 2026 Tom Kralidis
 # Copyright (c) 2023 Ricardo Garcia Silva
 # Copyright (c) 2025 Angelos Tzotsos
 #
@@ -30,7 +30,7 @@
 #
 # =================================================================
 
-__version__ = '0.23.dev0'
+__version__ = '0.24.dev0'
 
 import click
 try:
@@ -38,6 +38,8 @@ try:
     from importlib.metadata import entry_points
 except ImportError:
     from importlib_metadata import entry_points
+
+from pygeoapi.asyncapi import asyncapi
 from pygeoapi.config import config
 from pygeoapi.openapi import openapi
 
@@ -110,3 +112,4 @@ def serve(ctx, server):
 
 cli.add_command(config)
 cli.add_command(openapi)
+cli.add_command(asyncapi)

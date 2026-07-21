@@ -35,8 +35,7 @@ def manage_collection(api: API, request: APIRequest, action: str, dataset: str =
     headers = request.get_response_headers(SYSTEM_LOCALE)
     pidb_provider = PostgresIndoorDB()
 
-    # --- Action: CREATE ---
-    if action == 'create':
+    if action in ['create', 'update']:
         if not request.data:
             msg = 'No data found'
             LOGGER.error(msg)
@@ -59,12 +58,24 @@ def manage_collection(api: API, request: APIRequest, action: str, dataset: str =
             return api.get_exception(
                 HTTPStatus.BAD_REQUEST,
                 headers, request.format, 'InvalidParameterValue', msg)
-
+        
+    # --- Action: CREATE ---
+    if action == 'create':
         # 2. Call Provider to Create
         try:
             pidb_provider.connect()
+            c_id = data.get('id')
+            title = data.get('title')
+            item_type = data.get('itemType', 'indoorfeature')
+            if not c_id or not title:
+                return api.get_exception(
+                HTTPStatus.BAD_REQUEST,
+                headers, request.format, "Missing required parameter 'id' and 'title'.", msg)
+            elif item_type != 'indoorfeature':
+                return api.get_exception(
+                HTTPStatus.BAD_REQUEST,
+                headers, request.format, "Invalid 'itemType' value. Expected 'indoorfeature'.", msg)
             new_id = pidb_provider.post_collection(data)
-
             if not new_id:
                 return api.get_exception(
                     HTTPStatus.CONFLICT, headers, request.format,
@@ -92,6 +103,24 @@ def manage_collection(api: API, request: APIRequest, action: str, dataset: str =
                     'NotFound', f'Collection {collection_id} not found')
             
             return headers, HTTPStatus.NO_CONTENT, ''
+
+        except Exception as e:
+            return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', str(e))
+        finally:
+            pidb_provider.disconnect()
+    
+    elif action == 'update':
+        try:
+            pidb_provider.connect()
+            collection_id = str(dataset)
+             
+            success = pidb_provider.patch_collection(collection_id, data)
+            if not success:
+                return api.get_exception(
+                    HTTPStatus.NOT_FOUND, headers, request.format,
+                    'NotFound', f'Collection {collection_id} not found')
+            
+            return headers, HTTPStatus.NO_CONTENT, 'Updated successfully.'
 
         except Exception as e:
             return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', str(e))

@@ -89,7 +89,6 @@ class PostgresIndoorDB:
                     
                     clean_list.append({
                         'id': c_id,
-                        # Default to the ID if title is missing
                         'title': props.get('title', c_id),
                         'itemType': props.get('itemType', 'indoorfeature')
                     })
@@ -142,7 +141,7 @@ class PostgresIndoorDB:
             except Exception as e:
                 LOGGER.debug(e)
                 raise e
-    
+
     def post_collection(self, collection):
         """
         Creates a new collection.
@@ -163,7 +162,6 @@ class PostgresIndoorDB:
         }
         with self.connection.cursor() as cur:
             try:
-                # 2. Insert (Let Postgres handle the 'id' column automatically)
                 insert_query = """
                     INSERT INTO collection (id_str, collection_property)
                     VALUES (%s, %s)
@@ -228,7 +226,46 @@ class PostgresIndoorDB:
                 self.connection.rollback()
                 LOGGER.error(f"Error creating collection: {e}")
                 raise e
+            
+
+    def patch_collection(self, collection_id:str, data):
+        with self.connection.cursor() as cur:
+            try:
+                cur.execute("SELECT id FROM collection WHERE id_str = %s", (collection_id,))
+                row = cur.fetchone()
+                
+                if not row:
+                    return False # Collection not found
+                
+                coll_pk = row[0]
+
+                sql = "SELECT collection_property FROM collection WHERE id = %s"
+                cur.execute(sql, (coll_pk,))
+
+                collection_json = cur.fetchone()
+
+                fields = []
+                values = []
+                
+                if 'title' in data:
+                    collection_json['title'] = data['title']
+
+                if 'description' in data:
+                    collection_json['description'] = data['description']
+
+                update_sql = "UPDATE collection SET collection_property = %s WHERE id = %s"
+                cur.execute(update_sql, (json.dumps(collection_json),coll_pk,))
+
+                self.connection.commit()
+                return True
+                    
+            except Exception as e:
+                self.connection.rollback()
+                LOGGER.error(f"Error updating collection: {e}")
+                raise e
+
 # endregion
+
 
 # region IndoorFeatures 
     def is_indoor_collection(self, collection_id:str):
@@ -260,7 +297,6 @@ class PostgresIndoorDB:
         """
         Retrieve the indoor feature collection /collections/{collectionId}/items
         Optimized to fetch data and total count in a single query.
-        /collections/{collectionId}/items
         """
         try:    
             # 1. Prepare Filter Strings
@@ -363,7 +399,6 @@ class PostgresIndoorDB:
             properties = props or {}
             thematic_layers = []
             interlayer_connections = []
-            # Initialize Skeleton
             result_feature = {
                 "type": "Feature",
                 "id": feature_id_str,
@@ -512,7 +547,6 @@ class PostgresIndoorDB:
                 res = cur.fetchone()
                 
                 if not res:
-                    # Item not found, usually returns 404 in API, but here we can just return
                     msg = f"Feature {feature_id} not found."
                     LOGGER.warning(msg)
                     raise ValueError(msg)
@@ -543,7 +577,6 @@ class PostgresIndoorDB:
                 # 3. DELETE PARENT (The IndoorFeature itself)
                 cur.execute("DELETE FROM indoorfeature WHERE id = %s", (feature_pk,))
 
-                # Commit is handled by the context manager
                 self.connection.commit()
                 return True
             except Exception as e:
@@ -660,7 +693,7 @@ class PostgresIndoorDB:
     
     def _get_layer(self, layer_pk:int, level:str=None, bbox:list=None):
         """
-        Retrieves a single Thematic Layer.
+        Retrieves a single Thematic Layer with Integer ID.
         If not filtered, just the meta data is given.
         - PrimalSpace: Filtered by 'level' if provided.
         - DualSpace: Returns the ENTIRE network (unfiltered) for connectivity.
@@ -703,7 +736,7 @@ class PostgresIndoorDB:
 
     def get_layer(self, collection_id:str, feature_id:str, layer_id:str, level:str=None, bbox:list=None):
         """
-        Retrieves a single Thematic Layer.
+        Retrieves a single Thematic Layer with String ID.
         If not filtered, just the meta data is given.
         - PrimalSpace: Filtered by 'level' if provided.
         - DualSpace: Returns the ENTIRE network (unfiltered) for connectivity.
@@ -817,7 +850,7 @@ class PostgresIndoorDB:
     def _get_primal_space(self, layer_pk:int, primalspace_id:str, p_create:str = None, p_termination:str=None, level:str=None, bbox:list=None):
         """
         Helper to build PrimalSpaceLayer. 
-        Supports optional filtering by 'level'.
+        Supports optional filtering by 'level' and 'bbox'.
         """
         primal_space = {
             "id": primalspace_id, 
@@ -1053,7 +1086,7 @@ class PostgresIndoorDB:
             
                 layer_new = cur.fetchone()
             
-                # Insert Primal Members (Cells/Boundaries) - returns duality dict 
+                # Insert Primal Members (Cells/Boundaries) - returns duality dictionary 
                 d_c, d_b = self._post_primal_members(collection_pk, feature_pk, layer_new[0], primal)
                 
                 # Insert Dual Members (Nodes/Edges)
@@ -1167,65 +1200,6 @@ class PostgresIndoorDB:
             
             # If there is no 2D geometry but 3D, project 3D to 2D geometry
             LOGGER.debug("Project geometry 3D to 2D ")
-            sql_project_shell = """
-            WITH faces AS (
-            SELECT
-                c.id,
-                s.shell_idx,
-                f.face
-            FROM cell_space_n_boundary c
-            CROSS JOIN LATERAL jsonb_array_elements(c."3D_geometry"->'coordinates')
-                WITH ORDINALITY AS s(shell, shell_idx)
-            CROSS JOIN LATERAL jsonb_array_elements(s.shell) AS f(face)
-            WHERE c."3D_geometry" IS NOT NULL
-                AND c.type = 'space'
-                AND c."2D_geometry" IS NULL
-                AND c.thematiclayer_id = %s
-                AND (
-                s.shell_idx = 1
-                OR jsonb_array_length(c."3D_geometry"->'coordinates') > 1
-                )
-            ),
-            proj AS (
-            SELECT
-                id,
-                shell_idx,
-                ST_SetSRID(
-                ST_Force2D(
-                ST_GeomFromGeoJSON(
-                    jsonb_build_object(
-                    'type', 'Polygon',
-                    'coordinates',
-                    CASE
-                        -- if face is already [ring,...], keep it; else wrap to [ring]
-                        WHEN jsonb_typeof(face->0->0) = 'array' THEN face
-                        ELSE jsonb_build_array(face)
-                    END
-                    )::text
-                )
-                ),
-                0 
-                ) AS g2d
-            FROM faces
-            ),
-            u AS (
-            SELECT
-                id,
-                ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx = 1) ) AS ext2d,
-                ST_UnaryUnion( ST_Collect(g2d) FILTER (WHERE shell_idx > 1) ) AS int2d
-            FROM proj
-            GROUP BY id
-            )
-            UPDATE cell_space_n_boundary c
-            SET "2D_geometry" =
-            CASE
-                WHEN u.int2d IS NULL THEN u.ext2d
-                ELSE ST_Difference(u.ext2d, u.int2d)
-            END
-            FROM u
-            WHERE c.id = u.id
-            AND c.thematiclayer_id = %s;
-            """
             sql_project_shell = """
             WITH targets AS (
             SELECT id, "3D_geometry"
