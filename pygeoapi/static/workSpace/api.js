@@ -23,6 +23,7 @@ export async function getCollectionItems(url) {
 /** Fetch a single feature by ID with a BBOX */
 export async function getSingleFeature(colId, featureId, bbox=false) {
   const hugeBbox = "-1800,-900,1800,900";
+  const text_Bbox = "-9999999, -9999999, 9999999, 9999999";
   let url = ""; 
   if (bbox) {
     url = `${API_BASE}/collections/${colId}/items/${featureId}?f=json&bbox=${hugeBbox}`;

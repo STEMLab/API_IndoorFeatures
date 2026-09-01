@@ -241,7 +241,6 @@ def collections(collection_id: str | None = None):
 
     :returns: HTTP response
     """
-    # 1. Handle Root (/collections)
     if collection_id is None:
         if request.method == 'GET':
             # Returns list (Merged YAML + DB from our previous step)
