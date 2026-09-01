@@ -2,12 +2,10 @@ import logging
 import json
 from http import HTTPStatus
 from typing import Tuple
-
 import urllib
 from pygeoapi.plugin import PLUGINS
 from pygeoapi.api import API, APIRequest, SYSTEM_LOCALE, F_HTML, F_JSON 
 import pygeoapi.api as core_api
-from pygeoapi.util import to_json
 from pygeoapi.util import render_j2_template, to_json
 import os
 from datetime import datetime
@@ -16,6 +14,11 @@ from pygeoapi.provider.postgresql_indoordb import PostgresIndoorDB
 import psycopg2
 from shapely import wkt
 from shapely.errors import ShapelyError
+from pygeoapi.provider.base import (
+    ProviderGenericError,
+    ProviderItemNotFoundError,
+    ProviderInvalidDataError,
+)
 
 # Load schema once when the module is loaded
 SCHEMA_PATH = 'data/indoorjson_schema.json'
@@ -41,7 +44,8 @@ def manage_collection(api: API, request: APIRequest, action: str, dataset: str =
             LOGGER.error(msg)
             return api.get_exception(
                 HTTPStatus.BAD_REQUEST,
-                headers, request.format, 'InvalidParameterValue', msg) 
+                headers, request.format, 'MissingParameterValue', msg)
+        
         data = request.data
         try:
             # Parse bytes data, if applicable
@@ -52,41 +56,41 @@ def manage_collection(api: API, request: APIRequest, action: str, dataset: str =
         try:
             data = json.loads(data)
         except (json.decoder.JSONDecodeError, TypeError) as err:
-            # Input does not appear to be valid JSON
             LOGGER.error(err)
-            msg = 'invalid request data'
+            msg = 'invalid request json data'
             return api.get_exception(
                 HTTPStatus.BAD_REQUEST,
                 headers, request.format, 'InvalidParameterValue', msg)
         
-    # --- Action: CREATE ---
     if action == 'create':
-        # 2. Call Provider to Create
         try:
             pidb_provider.connect()
-            c_id = data.get('id')
-            title = data.get('title')
-            item_type = data.get('itemType', 'indoorfeature')
-            if not c_id or not title:
+            c_id = data.get('id', None)
+            title = data.get('title', None)
+            item_type = data.get('itemType', None) 
+
+            if c_id is None or title is None:
                 return api.get_exception(
                 HTTPStatus.BAD_REQUEST,
-                headers, request.format, "Missing required parameter 'id' and 'title'.", msg)
-            elif item_type != 'indoorfeature':
+                headers, request.format, 'MissingParameterValue', "Missing required parameter 'id' and 'title'.")
+            elif item_type != 'indoorfeature' or item_type is None:
                 return api.get_exception(
                 HTTPStatus.BAD_REQUEST,
-                headers, request.format, "Invalid 'itemType' value. Expected 'indoorfeature'.", msg)
+                headers, request.format, 'InvalidParameterValue', "Invalid 'itemType' value. Expected 'indoorfeature'.")
+            
             new_id = pidb_provider.post_collection(data)
-            if not new_id:
+            if new_id is None:
                 return api.get_exception(
                     HTTPStatus.CONFLICT, headers, request.format,
-                    'Conflict', f'Collection already exists')
+                    'Conflict', f'Collection {c_id} already exists')
 
             response_data = {'id': new_id, 'status': 'created'}
-            return headers, HTTPStatus.CREATED, to_json(response_data, api.pretty_print)
         except Exception as e:
             return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', str(e))
         finally:
             pidb_provider.disconnect()
+
+        return headers, HTTPStatus.CREATED, to_json(response_data, api.pretty_print)
 
     # --- Action: DELETE ---
     elif action == 'delete':
@@ -101,13 +105,12 @@ def manage_collection(api: API, request: APIRequest, action: str, dataset: str =
                 return api.get_exception(
                     HTTPStatus.NOT_FOUND, headers, request.format,
                     'NotFound', f'Collection {collection_id} not found')
-            
-            return headers, HTTPStatus.NO_CONTENT, ''
-
         except Exception as e:
             return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', str(e))
         finally:
             pidb_provider.disconnect()
+
+        return headers, HTTPStatus.NO_CONTENT, ''
     
     elif action == 'update':
         try:
@@ -119,15 +122,15 @@ def manage_collection(api: API, request: APIRequest, action: str, dataset: str =
                 return api.get_exception(
                     HTTPStatus.NOT_FOUND, headers, request.format,
                     'NotFound', f'Collection {collection_id} not found')
-            
-            return headers, HTTPStatus.NO_CONTENT, 'Updated successfully.'
-
         except Exception as e:
             return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', str(e))
         finally:
             pidb_provider.disconnect()
 
-    return headers, HTTPStatus.METHOD_NOT_ALLOWED, ''
+        return headers, HTTPStatus.NO_CONTENT, 'Updated successfully.'
+            
+    else:
+        return headers, HTTPStatus.METHOD_NOT_ALLOWED, ''
 
 def get_collection(api: API, request: APIRequest, dataset=None) -> Tuple[dict, int, str]:
     """
@@ -141,19 +144,15 @@ def get_collection(api: API, request: APIRequest, dataset=None) -> Tuple[dict, i
     pidb_provider = PostgresIndoorDB()
     try:
         pidb_provider.connect()
-        # 1. Fetch from DB
         response = pidb_provider.get_collection(collection_id)
 
         if not response:
             return api.get_exception(
                 HTTPStatus.NOT_FOUND, headers, request.format,
-                'NotFound', f'Collection {collection_id} not found.')
+                'NotFound', f'Collection {collection_id} is not found.')
 
-        # 3. Construct Response
         response["keywords"] = []
         response["links"] = []
-
-        # Add Links
         response['links'].append({
             "href": f"{api.config['server']['url']}/collections/{collection_id}?f=json", 
             "rel": "self", "type": "application/json", "title": "Metadata"
@@ -171,18 +170,20 @@ def get_collection(api: API, request: APIRequest, dataset=None) -> Tuple[dict, i
         content = render_j2_template(
                 api.config, api.config['server']['templates'],
                 'collections/collection.html', response, request.locale)
-        
-        return headers, HTTPStatus.OK, content
+    except ProviderItemNotFoundError as e:
+        return api.get_exception(HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound', str(e.message))
     except Exception as e:
         return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', str(e))
     finally:
         pidb_provider.disconnect()
 
+    return headers, HTTPStatus.OK, content
+
 def is_indoor_collection(collection_id: str) -> bool:
     pidb_provider = PostgresIndoorDB()
     try:
         pidb_provider.connect()
-        if pidb_provider.is_indoor_collection(collection_id):
+        if pidb_provider.check_indoor_collection(collection_id):
             return True
         else:
             return False
@@ -208,47 +209,32 @@ def manage_collection_item(api: API, request: APIRequest, action,
         return api.get_format_exception(request)
     
     headers = request.get_response_headers(SYSTEM_LOCALE)
-    pidb_provider = PostgresIndoorDB()
-    executed, collections = get_list_of_collections_id()
-    if executed is False:
-        msg = str(collections)
-        return api.get_exception(
-            HTTPStatus.BAD_REQUEST,
-            headers, request.format, 'ConnectingError', msg)
-    
-    if dataset not in collections:
-        msg = 'Collection not found'
-        LOGGER.error(msg)
-        return api.get_exception(
-            HTTPStatus.NOT_FOUND,
-            headers, request.format, 'NotFound', msg)
-    
     collection_str_id = str(dataset)
-    ifeature_id = identifier
+    
     if action == 'create':
-        if not request.data:
+        if request.data is None:
             msg = 'No data found'
             LOGGER.error(msg)
             return api.get_exception(
                 HTTPStatus.BAD_REQUEST,
-                headers, request.format, 'InvalidParameterValue', msg) 
+                headers, request.format, 'MissingParameterValue', msg) 
         data = request.data
         try:
             # Parse bytes data, if applicable
             data = data.decode()
         except (UnicodeDecodeError, AttributeError):
             pass
-
         try:
             data = json.loads(data)
         except (json.decoder.JSONDecodeError, TypeError) as err:
-            # Input does not appear to be valid JSON
             LOGGER.error(err)
-            msg = 'invalid request data'
+            msg = 'invalid request json data'
             return api.get_exception(
                 HTTPStatus.BAD_REQUEST,
                 headers, request.format, 'InvalidParameterValue', msg)
-        LOGGER.debug('Creating item')  
+        LOGGER.debug('Creating item') 
+
+        pidb_provider = PostgresIndoorDB() 
         try:
             pidb_provider.connect()
             #TODO: validate(instance=data, schema=INDOOR_SCHEMA)
@@ -257,29 +243,35 @@ def manage_collection_item(api: API, request: APIRequest, action,
             )
             if not ifeature_id:
                 return api.get_exception(
+                    HTTPStatus.NOT_FOUND,
+                    headers, request.format, 'NotFound', "collection not found.") 
+            headers['Location'] = '{}/{}/items/{}'.format(api.get_collections_url(), dataset, ifeature_id)
+
+        except ProviderInvalidDataError as error:
+            return api.get_exception(
                 HTTPStatus.BAD_REQUEST,
-                headers, request.format, 'InvalidParameterValue', "requested feature already exists.") 
-        except (Exception, psycopg2.Error) as error:
+                headers, request.format, 'InvalidParameterValue', error.message)
+        
+        except Exception as error:
             msg = str(error)
             return api.get_exception(
                 HTTPStatus.BAD_REQUEST,
                 headers, request.format, 'ConnectingError', msg)
         finally:
             pidb_provider.disconnect()
-        headers['Location'] = '{}/{}/items/{}'.format(
-            api.get_collections_url(), dataset, ifeature_id)
 
         return headers, 201, to_json({"status": "Created", "id": ifeature_id}, api.pretty_print)  
     
-    if action == 'delete':
+    elif action == 'delete':
         LOGGER.debug('Deleting item')  
-
+        ifeature_id = str(identifier)
+        pidb_provider = PostgresIndoorDB()
         try:
             pidb_provider.connect()  
             pidb_provider.delete_indoorfeature(
                 collection_str_id, ifeature_id
             )
-        except (Exception, psycopg2.Error) as error:
+        except Exception as error:
             msg = str(error)
             return api.get_exception(
                 HTTPStatus.BAD_REQUEST,
@@ -287,7 +279,11 @@ def manage_collection_item(api: API, request: APIRequest, action,
         finally:
             pidb_provider.disconnect()
 
-        return headers, HTTPStatus.NO_CONTENT, ''    
+        return headers, HTTPStatus.NO_CONTENT, '' 
+
+    else:
+        return headers, HTTPStatus.METHOD_NOT_ALLOWED, ''
+    
 
 def get_collection_items(api: API, request: APIRequest, dataset) -> Tuple[dict, int, str]:
     """
@@ -298,9 +294,9 @@ def get_collection_items(api: API, request: APIRequest, dataset) -> Tuple[dict, 
         return api.get_format_exception(request)
     
     headers = request.get_response_headers(SYSTEM_LOCALE)
-    executed, collections = get_list_of_collections_id()
     collection_str_id = str(dataset)
-
+    executed, collections = get_list_of_collections_id()
+    
     if executed is False:
         msg = str(collections)
         return api.get_exception(
@@ -382,24 +378,16 @@ def get_collection_items(api: API, request: APIRequest, dataset) -> Tuple[dict, 
             limit=limit,
             offset=offset,
         )
-        # --- GENERATE LINKS (Pagination) ---
         links = []
-        
-        # 1. Self Link
-        # Reconstructs current URL with current params
         self_href = f"{api.base_url}/collections/{collection_str_id}/items?offset={offset}&limit={limit}"
         if bbox:
             self_href += f"&bbox={','.join(map(str, bbox))}"
-        
         links.append({
             'rel': 'self',
             'type': 'application/geo+json',
             'title': 'This document',
             'href': self_href
         })
-
-        # 2. Next Link
-        # Only show if there are more items remaining
         if (offset + limit) < number_matched:
             next_offset = offset + limit
             next_href = f"{api.base_url}/collections/{collection_str_id}/items?offset={next_offset}&limit={limit}"
@@ -412,9 +400,6 @@ def get_collection_items(api: API, request: APIRequest, dataset) -> Tuple[dict, 
                 'title': 'Next page',
                 'href': next_href
             })
-
-        # 3. Previous Link
-        # Only show if we are not on the first page
         if offset > 0:
             prev_offset = max(0, offset - limit)
             prev_href = f"{api.base_url}/collections/{collection_str_id}/items?offset={prev_offset}&limit={limit}"
@@ -435,7 +420,6 @@ def get_collection_items(api: API, request: APIRequest, dataset) -> Tuple[dict, 
             'href': f"{api.config['server']['url']}/collections/{dataset}"
         })
 
-        # --- CONSTRUCT RESPONSE ---
         feature_collection = {
             'type': 'FeatureCollection',
             'numberMatched': number_matched,
@@ -451,11 +435,13 @@ def get_collection_items(api: API, request: APIRequest, dataset) -> Tuple[dict, 
         feature_collection['items_path'] = f"{api.base_url}/collections/{dataset}/items"
         content_body = render_j2_template(api.config, api.config['server']['templates'],
                                      'collections/items/index.html',
-                                     feature_collection, request.locale)
-        
-
-        # 3. Return in the correct order: Headers, Status, Content
-        return headers, HTTPStatus.OK, content_body
+                                     feature_collection, request.locale)  
+    except ProviderItemNotFoundError as error:
+                msg = 'item not found'
+                LOGGER.error(msg)
+                return api.get_exception(
+                    HTTPStatus.NOT_FOUND,
+                    headers, request.format, 'NotFound', msg)
     except Exception as err:
         LOGGER.error(f"Provider error: {err}")
         return api.get_exception(
@@ -463,6 +449,8 @@ def get_collection_items(api: API, request: APIRequest, dataset) -> Tuple[dict, 
             headers, request.format, 'NoApplicableCode', 'Internal Server Error')
     finally:
         pidb_provider.disconnect()
+
+    return headers, HTTPStatus.OK, content_body
 
 def get_collection_item(api: API, request: APIRequest, dataset, identifier) -> Tuple[dict, int, str]:
     """
@@ -483,9 +471,7 @@ def get_collection_item(api: API, request: APIRequest, dataset, identifier) -> T
     
     headers = request.get_response_headers()
 
-    # --- Extract Level Parameter ---
     level = request.params.get('level')
-    # --- BBOX PARAMETER ---
     LOGGER.debug('Processing bbox parameter')
     bbox_param = request.params.get('bbox')
     bbox = None
@@ -499,7 +485,6 @@ def get_collection_item(api: API, request: APIRequest, dataset, identifier) -> T
                 HTTPStatus.BAD_REQUEST,
                 headers, request.format, 'InvalidParameterValue', msg)
     
-    # You might want to strip whitespace if it's a string
     if level:
         level = str(level).strip()
 
@@ -512,19 +497,16 @@ def get_collection_item(api: API, request: APIRequest, dataset, identifier) -> T
             bbox=bbox
         )
         
-        # If the result is None (e.g., ID doesn't exist), handle 404
         if not response:
              msg = f'Item {identifier} not found'
              return api.get_exception(
                 HTTPStatus.NOT_FOUND,
                 headers, request.format, 'NotFound', msg)
         
-       # --- Construct Self Link with Query Params ---
         base_url = f"{api.config['server']['url']}/collections/{collection_str_id}/items/{ifeature_str_id}"
-        
         self_href = base_url
         
-        # If level parameter exists, append it to the URL
+        # If level and bbox parameter exist, append it to the URL
         if level and bbox:
             query_params = {'level': level, 'bbox': bbox}
             self_href += "?" + urllib.parse.urlencode(query_params)
@@ -551,7 +533,6 @@ def get_collection_item(api: API, request: APIRequest, dataset, identifier) -> T
         content = render_j2_template(api.config, api.config['server']['templates'],
                                      'collections/items/item.html',
                                      response, request.locale)
-        return headers, HTTPStatus.OK, content
     except (Exception, psycopg2.Error) as error:
         msg = str(error)
         return api.get_exception(
@@ -559,7 +540,8 @@ def get_collection_item(api: API, request: APIRequest, dataset, identifier) -> T
             headers, request.format, 'ConnectingError', msg)
     finally:
         pidb_provider.disconnect()
-    
+
+    return headers, HTTPStatus.OK, content
     
 #endregion
 
@@ -625,6 +607,11 @@ def manage_collection_item_layer(api: API, request: APIRequest, action, dataset,
                 data
             )
             layer_str_id = data.get("id")
+            headers['Location'] = '{}/{}/items/{}'.format(api.get_collections_url(), dataset, layer_str_id)
+        except ProviderItemNotFoundError as error:
+            return api.get_exception(
+                HTTPStatus.NOT_FOUND,
+                headers, request.format, 'NotFound', error.user_msg)
         except (Exception, psycopg2.Error) as error:
             msg = str(error)
             return api.get_exception(
@@ -632,20 +619,19 @@ def manage_collection_item_layer(api: API, request: APIRequest, action, dataset,
                 headers, request.format, 'ConnectingError', msg)
         finally:
             pidb_provider.disconnect()
-        headers['Location'] = '{}/{}/items/{}'.format(
-            api.get_collections_url(), dataset, layer_str_id)
 
         return headers, 201, to_json({"status": "Created", "id": layer_str_id}, api.pretty_print)  
-        # =====================================================================
-        # ACTION: DELETE (DELETE)
-        # =====================================================================
+
     elif action == 'delete':
         LOGGER.debug('Deleting layer')
         
         try:
             pidb_provider.connect()
             success = pidb_provider.delete_thematic_layer(collection_str_id, feature_str_id, layer_str_id)
-            
+            if not success:
+                return api.get_exception(
+                    HTTPStatus.NOT_FOUND,
+                    headers, request.format, 'NotFound', "layer not found.")
         except (Exception, psycopg2.Error) as error:
             msg = str(error)
             return api.get_exception(
@@ -653,10 +639,12 @@ def manage_collection_item_layer(api: API, request: APIRequest, action, dataset,
                 headers, request.format, 'ConnectingError', msg)
         finally:
             pidb_provider.disconnect()
-            return headers, 204, '' # No Content
+
+        return headers, 204, '' # No Content
 
     else:
         return api.get_exception(405, headers, request.format, 'MethodNotAllowed', "Action not yet implemented")
+    
 
 def get_collection_item_layers(api: API, request: APIRequest, dataset, identifier) -> Tuple[dict, int, str]:
     """
@@ -666,9 +654,9 @@ def get_collection_item_layers(api: API, request: APIRequest, dataset, identifie
         return api.get_format_exception(request)
     
     headers = request.get_response_headers(SYSTEM_LOCALE) # Use standard locale if api_headers not avail
-    executed, collections = get_list_of_collections_id()
     collection_str_id = str(dataset)
     ifeature_str_id = str(identifier)
+    executed, collections = get_list_of_collections_id()
     
     if executed is False:
         msg = str(collections)
@@ -737,11 +725,7 @@ def get_collection_item_layers(api: API, request: APIRequest, dataset, identifie
             limit=limit, 
             offset=offset
         )
-
-        # 4. Construct Lightweight Summary & Base URL
         base_url = f"{api.config['server']['url']}/collections/{collection_str_id}/items/{ifeature_str_id}/layers"
-
-        # 1. Add Detail Links to each Layer
         for layer in data["layers"]:
             layer['links'] = [
                 {
@@ -751,9 +735,6 @@ def get_collection_item_layers(api: API, request: APIRequest, dataset, identifie
                     "title": "Layer Detail"
                 }
             ]
-
-        # 2. Prepare Query Parameters (Robust Construction)
-        # We build a base dictionary for params that stay constant (theme, level, limit)
         base_params = {
             'limit': limit
         }
@@ -767,8 +748,6 @@ def get_collection_item_layers(api: API, request: APIRequest, dataset, identifie
             params = base_params.copy()
             params['offset'] = target_offset
             return f"{base_url}?{urllib.parse.urlencode(params)}"
-
-        # 3. Add Pagination Links (Self, Next, Prev)
         
         # SELF Link
         data['links'].append({
@@ -797,15 +776,16 @@ def get_collection_item_layers(api: API, request: APIRequest, dataset, identifie
                 "type": "application/json",
                 "title": "Previous page"
             })  
-
-        return headers, HTTPStatus.OK, to_json(data, api.pretty_print)
-
     except Exception as e:
         LOGGER.error(f"Error fetching layers: {e}")
-        return api.get_exception(500, headers, request.format, 'ServerError', str(e))
-
+        return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', str(e))
+    except ProviderItemNotFoundError as e:
+        LOGGER.error(f"item not found")
+        return api.get_exception(HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound', "item not found")
     finally:
         pidb_provider.disconnect()
+
+    return headers, HTTPStatus.OK, to_json(data, api.pretty_print)
 
 def get_collection_item_layer(api: API, request: APIRequest, dataset, identifier, layer) -> Tuple[dict, int, str]:
     """
@@ -847,8 +827,8 @@ def get_collection_item_layer(api: API, request: APIRequest, dataset, identifier
         pidb_provider.connect()
         result = pidb_provider.get_layer(collection_str_id, ifeature_str_id, layer_str_id, bbox=bbox, level=level)
 
-        if result is None:
-            msg = f"Layer '{layer_str_id}' not found in feature '{ifeature_str_id}'"
+        if not result:
+            msg = f"item not found"
             return api.get_exception(
                 HTTPStatus.NOT_FOUND,
                 headers, request.format, 'NotFound', msg)
@@ -893,9 +873,6 @@ def get_collection_item_interlayerconnections(api: API, request: APIRequest, dat
     collection_id = str(dataset)
     item_id = str(identifier)
     
-    # ---------------------------------------------------------
-    # 1. Parse & Validate Pagination (Limit/Offset)
-    # ---------------------------------------------------------
     try:
         offset = int(request.params.get('offset'))
         if offset < 0: raise ValueError
@@ -908,10 +885,6 @@ def get_collection_item_interlayerconnections(api: API, request: APIRequest, dat
     except (TypeError, ValueError):
         limit = 10 
 
-    # ---------------------------------------------------------
-    # 2. Parse Filters
-    # ---------------------------------------------------------
-    # Map API parameter names to Provider arguments
     connected_layer_param = request.params.get('connectedLayerId')
     topo_type_param = request.params.get('typeOfTopoExpression')
 
@@ -919,9 +892,6 @@ def get_collection_item_interlayerconnections(api: API, request: APIRequest, dat
 
     try:
         pidb_provider.connect()
-        
-        # 3. Call Provider
-        # Returns: {'connections': [...], 'numberMatched': X, 'numberReturned': Y}
         data = pidb_provider.get_interlayer_connections(
             collection_id, 
             item_id,
@@ -930,11 +900,7 @@ def get_collection_item_interlayerconnections(api: API, request: APIRequest, dat
             limit=limit,
             offset=offset
         )
-
-        # 4. Construct Links
         base_url = f"{api.config['server']['url']}/collections/{collection_id}/items/{item_id}/interlayerconnections"
-        
-        # Build query string for links to persist filters
         query_params = f"?limit={limit}"
         if connected_layer_param: query_params += f"&connectedLayerId={connected_layer_param}"
         if topo_type_param: query_params += f"&typeOfTopoExpression={topo_type_param}"
@@ -971,13 +937,15 @@ def get_collection_item_interlayerconnections(api: API, request: APIRequest, dat
             })
 
         data['links'] = links
-
-        return headers, HTTPStatus.OK, to_json(data, api.pretty_print)
-        
+    except ProviderItemNotFoundError as e:
+        return api.get_exception(HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound', str(e.user_msg))
     except Exception as e:
         return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', str(e))
     finally:
         pidb_provider.disconnect()
+
+    return headers, HTTPStatus.OK, to_json(data, api.pretty_print)
+
 
 def manage_collection_item_interlayerconnections(api: API, request: APIRequest, action: str, collection_id: str, item_id: str, connection_id: str = None) -> Tuple[dict, int, str]:
     """
@@ -999,15 +967,18 @@ def manage_collection_item_interlayerconnections(api: API, request: APIRequest, 
             pidb_provider.connect()
             new_id = pidb_provider.post_interlayer_connection(collection_id, item_id, data)
         
-            if new_id:
-                headers['Location'] = f"{api.config['server']['url']}/collections/{collection_id}/items/{item_id}/interlayerconnections/{new_id}"
-                return headers, HTTPStatus.CREATED, to_json({"status": "Created", "id": new_id}, api.pretty_print)
-            else:
-                return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', 'Creation failed (check logs)')
+            if not new_id:
+                return api.get_exception(HTTPStatus.CONFLICT, headers, request.format, 'Conflict', 'Creation failed')
+            
+            headers['Location'] = f"{api.config['server']['url']}/collections/{collection_id}/items/{item_id}/interlayerconnections/{new_id}"
         except Exception as e:
             return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', str(e))
+        except ProviderItemNotFoundError as e:
+            return api.get_exception(HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound', str(e.user_msg))  
         finally:
             pidb_provider.disconnect()
+
+        return headers, HTTPStatus.CREATED, to_json({"status": "Created", "id": new_id}, api.pretty_print)
 
     elif action == 'delete':
         if not connection_id:
@@ -1016,14 +987,14 @@ def manage_collection_item_interlayerconnections(api: API, request: APIRequest, 
         try:
             pidb_provider.connect()
             success = pidb_provider.delete_interlayer_connection(collection_id, item_id, connection_id)
-            if success:
-                return headers, HTTPStatus.NO_CONTENT, ''
-            else:
-                return api.get_exception(HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound', 'Connection not found')
+
         except Exception as e:
             return api.get_exception(HTTPStatus.INTERNAL_SERVER_ERROR, headers, request.format, 'ServerError', str(e))
         finally:
             pidb_provider.disconnect()
+
+        return headers, HTTPStatus.NO_CONTENT, ''
+    
     else:
         return api.get_exception(405, headers, request.format, 'MethodNotAllowed', "Action not yet implemented")
 # endregion
@@ -1040,9 +1011,6 @@ def get_primal(api: API, request: APIRequest, collection_id: str, item_id: str, 
     headers = request.get_response_headers(SYSTEM_LOCALE)
     pidb_provider = PostgresIndoorDB()
 
-    # ---------------------------------------------------------
-    # 1. Parse Query Parameters
-    # ---------------------------------------------------------
     level = request.params.get('level')
     cell_space_name = request.params.get('cellSpaceName')
     poi = request.params.get('poi')
@@ -1053,9 +1021,6 @@ def get_primal(api: API, request: APIRequest, collection_id: str, item_id: str, 
         return api.get_exception(HTTPStatus.BAD_REQUEST, headers, request.format, 'ValueError', 'Invalid value for "isVirtual". Expected "true" or "false".')
         
     try:
-        # ---------------------------------------------------------
-        # 2. Call Provider with Filters
-        # ---------------------------------------------------------
         pidb_provider.connect()
         response = pidb_provider.get_primal_members(
             collection_id, 
@@ -1070,7 +1035,6 @@ def get_primal(api: API, request: APIRequest, collection_id: str, item_id: str, 
         if response is None:
             return api.get_exception(HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound', 'Layer not found')
 
-        # 4. Construct Self Link (Persisting filters is good practice)
         base_url = f"{api.config['server']['url']}/collections/{collection_id}/items/{item_id}/layers/{layer_id}/primal"
         
         # Rebuild query string
@@ -1144,12 +1108,9 @@ def manage_primal(api: API, request: APIRequest, action: str, collection_id: str
                 headers, request.format, 'InvalidParameterValue', msg)
         
     if action == 'create':
-        # 2. Check FeatureType (Space vs Boundary)
         feature_type = data.get('featureType')
         if feature_type not in ['CellSpace', 'CellBoundary']:
             return api.get_exception(HTTPStatus.BAD_REQUEST, headers, request.format, 'InvalidParameterValue', 'featureType must be CellSpace or CellBoundary')
-
-        # 3. Create in DB with Error Handling
         try:
             pidb_provider.connect()
             new_id = pidb_provider.post_primal_member(collection_id, item_id, layer_id, data)
@@ -1233,7 +1194,6 @@ def get_primal_member(api: API, request: APIRequest, collection_id: str, item_id
         if not member_data:
             return api.get_exception(HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound', 'Member not found')
 
-        # Add HATEOAS Links
         member_data["links"] = [
             {
                 "href": f"{api.config['server']['url']}/collections/{collection_id}/items/{item_id}/layers/{layer_id}/primal/{member_id}",
@@ -1263,7 +1223,6 @@ def get_dual(api: API, request: APIRequest, collection_id: str, item_id: str, la
     headers = request.get_response_headers(SYSTEM_LOCALE)
     pidb_provider = PostgresIndoorDB()
 
-    # 1. Extract and Parse Query Parameters
     min_weight_param = request.params.get('minWeight')
     max_weight_param = request.params.get('maxWeight')
 
@@ -1281,7 +1240,6 @@ def get_dual(api: API, request: APIRequest, collection_id: str, item_id: str, la
     
     try:
         pidb_provider.connect()
-        # 2. Call the Provider function
         response = pidb_provider.get_dual_members(
             collection_id, 
             item_id, 
@@ -1289,7 +1247,7 @@ def get_dual(api: API, request: APIRequest, collection_id: str, item_id: str, la
             min_weight=min_weight, 
             max_weight=max_weight
         )
-        # 3. Construct Self Link with Query Params (Robust Method)
+
         base_url = f"{api.config['server']['url']}/collections/{collection_id}/items/{item_id}/layers/{layer_id}/dual"
 
         query_params = {}
@@ -1301,8 +1259,6 @@ def get_dual(api: API, request: APIRequest, collection_id: str, item_id: str, la
         self_href = base_url
         if query_params:
             self_href += "?" + urllib.parse.urlencode(query_params)
-
-        # 4. Construct Response
         response["links"] = [
                 {
                     "href": self_href,
@@ -1337,7 +1293,6 @@ def get_dual_member(api: API, request: APIRequest, collection_id: str, item_id: 
         if not member:
             return api.get_exception(HTTPStatus.NOT_FOUND, headers, request.format, 'NotFound', 'Member not found')
 
-        # 3. HATEOAS Links
         member["links"] = [
             {
                 "href": f"{api.config['server']['url']}/collections/{collection_id}/items/{item_id}/layers/{layer_id}/dual/{member_id}",
@@ -1382,7 +1337,6 @@ def manage_dual(api: API, request: APIRequest, action: str, collection_id: str, 
 
     if action in ['create', 'update']:
         data = request.data
-        # 1. Parse JSON Body
         if not data:
             msg = 'No data found'
             LOGGER.error(msg)
@@ -1560,7 +1514,6 @@ def get_route(api: API, request: APIRequest, collection_id: str, item_id: str, l
     headers = request.get_response_headers(SYSTEM_LOCALE)
     pidb_provider = PostgresIndoorDB()
 
-    # 1. Extract Start (sn) and Destination (dn) nodes from query parameters
     sn = request.params.get('sn')
     dn = request.params.get('dn')
 
@@ -1570,8 +1523,6 @@ def get_route(api: API, request: APIRequest, collection_id: str, item_id: str, l
             headers, request.format, 'MissingParameter', "Both 'sn' and 'dn' are required")
 
     try:
-        # 2. Call the Provider (The logic we discussed earlier)
-        # Expecting a list of nodes/edges or a GeoJSON LineString
         pidb_provider.connect()
         response = pidb_provider.routing_query(collection_id, item_id, layer_id, sn, dn)
 
@@ -1580,7 +1531,6 @@ def get_route(api: API, request: APIRequest, collection_id: str, item_id: str, l
                  HTTPStatus.NOT_FOUND, 
                  headers, request.format, 'NotFound', 'No path found between the specified nodes')
 
-        # 3. Construct Self Link
         else:
             base_url = f"{api.config['server']['url']}/collections/{collection_id}/items/{item_id}/layers/{layer_id}/dual/route"
             self_href = f"{base_url}?sn={urllib.parse.quote(sn)}&dn={urllib.parse.quote(dn)}"
@@ -1661,13 +1611,15 @@ def get_list_of_collections_id():
         pidb_provider.connect()
         result = pidb_provider.get_collections_list()
         collections_id = []
-        for row in result:
-            collections_id.append(row.get('id'))
-        return True, collections_id
+        if result:
+            for row in result:
+                collections_id.append(row.get('id'))
+        
     except (Exception, psycopg2.Error) as error:
-        return False, error
+        return False, None
     finally:
         pidb_provider.disconnect()
+    return True, collections_id
 
 def validate_bbox(value=None) -> list:
     """
