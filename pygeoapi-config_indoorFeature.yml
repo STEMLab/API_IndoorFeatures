@@ -25,7 +25,7 @@ logging:
 
 metadata:
     identification:
-        title: IndoorFeatures API Demonstration
+        title: API-IndoorFeatures Demonstration
         description: Developing IndoorGML and IndoorJSON support for OGC API Standards.
         keywords:
             - IndoorGML
@@ -41,9 +41,9 @@ metadata:
         name: MIT
         url: https://opensource.org/licenses/MIT
     contact:
-        name: Taehoon KIM
-        email: kim.taehoon@aist.go.jp
-        url: https://github.com/STEMLab/IndoorGML_API
+        name: Dong Kwon Kang / Seongmin Choi / Taehoon KIM 
+        email: kangdg2001@pusan.ac.kr / csm010311@pusan.ac.kr / kim.taehoon@aist.go.jp
+        url: https://github.com/STEMLab/API-IndoorFeatures
 
 resources:
     pusan_national_university:

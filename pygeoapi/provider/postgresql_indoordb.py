@@ -20,7 +20,6 @@ class PostgresIndoorDB:
         """
         PostgresIndoorDB Class Constructor
         """
-        # define defaults inside init to avoid class-level state issues
         self.host = 'localhost'
         self.port = 5432
         self.dbname = 'indoordb'
@@ -31,7 +30,6 @@ class PostgresIndoorDB:
         if datasource is not None:
             self.host = datasource.get('host', self.host)
             self.port = datasource.get('port', self.port)
-            # Fixed: Ensure code matches docstring (using 'dbname' consistently)
             self.dbname = datasource.get('dbname', self.dbname) 
             self.user = datasource.get('user', self.user)
             self.password = datasource.get('password', self.password)
