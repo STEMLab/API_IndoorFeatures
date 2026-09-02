@@ -1,12 +1,12 @@
-# IndoorFeature API
+# API-IndoorFeatures
 
 API - IndoorFeatures is a RESTful api implementation of the **OGC IndoorGML 2.0** standard, designed to align with **OGC API - Features** standards. This api extends the pygeoapi framework to provide specialized service layers for indoor environments.
 - We are working on `branch_for_indoorAPI` [branch](https://github.com/STEMLab/API_IndoorFeatures/tree/branch_for_indoorAPI).
 
 ### Naming
 
-This API is referred to as the **IndoorFeature API** because it implements
-the IndoorGML conceptual model, including spatial subdivision, topology,
+This API is referred to as the **API-IndoorFeatures** because it implements
+the IndoorGML 2.0 conceptual model, including spatial subdivision, topology,
 layering, and duality relationships.
 
 All resources are exchanged using **IndoorJSON**, which serves as the
