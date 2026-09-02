@@ -134,10 +134,11 @@ pygeoapi/db.sqlite3
 .pygeoapi/docker/examples/mvt-tippecanoe/ES/data
 
 # Tonny local
+# If you want to keep your test uploads private/local
 venv/
 __pycache__/
 *.pyc
-data/*.json   # If you want to keep your test uploads private/local
+data/*.json  
 
 # Seongmin local
 run.sh
@@ -146,3 +147,7 @@ init_db.py
 my_test.py
 data/*.png
 *.dbml
+data/
+openAPI/
+!openAPI/IndoorFeature_openAPI.yaml
+database/init_str_unique.sql
