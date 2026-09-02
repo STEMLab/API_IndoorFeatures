@@ -25,7 +25,7 @@ This project is a extension of
 ## 🛠 Technical Pedigree
 
 ### Built on [pygeoapi](https://pygeoapi.io)
-This engine is built upon a specialized fork of **pygeoapi**, a Python server implementation of the OGC API suite of standards. 
+This engine is built upon a specialized fork of **pygeoapi 0.22.0**, a Python server implementation of the OGC API suite of standards. 
 * **Standardized Access:** Provides RESTful endpoints using OpenAPI, JSON, and HTML.
 * **Extended Core:** We have customized the `api/indoorgml.py` core and developed custom providers `provider/postgresql_indoordb.py` to handle the unique hierarchy structure of `IndoorFeatures`.
 * **PostgreSQL/PostGIS:** Optimized schema of indoor DB for efficient query and geometric functions.
