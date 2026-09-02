@@ -54,7 +54,7 @@ This engine is built upon a specialized fork of **pygeoapi 0.22.0**, a Python se
 ## 📥 Installation & Setup
 ### 1. Prerequisites
 * Docker & Docker Compose (For PostGIS/pgRouting)
-* Python 3.10+ (For pygeoapi)
+* Python 3.10+ (For pygeoapi 0.22.0)
 
 ### 2. Environment Startup
 We recommend using a Python virtual environment to manage dependencies and avoid conflicts with system-level packages.
@@ -65,7 +65,7 @@ cd API-IndoorFeatures
 
 # Create and activate a Python Virtual Environment
 python3 -m venv .venv
-source venv/bin/activate
+source .venv/bin/activate
 
 # Install required dependencies
 pip install -r requirements-indoorfeature.txt
